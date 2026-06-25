@@ -977,24 +977,32 @@
         '<td class="num"><strong>' + qf(x.sugerido, a) + '</strong></td></tr>';
     }).join('');
     var html = '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Pedido sugerido</title>' +
-      '<style>body{font-family:Inter,Arial,sans-serif;color:#1c2233;margin:40px;}h1{font-size:22px;margin:0 0 2px;}' +
+      '<style>' +
+      '@page{size:A4 portrait;margin:14mm;}' +
+      '*{box-sizing:border-box;}' +
+      'body{font-family:Inter,Arial,sans-serif;color:#1c2233;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}' +
+      'h1{font-size:20px;margin:0 0 2px;}' +
       '.muted{color:#6b7390;}' +
-      '.wrap{display:inline-block;max-width:100%;}' +
-      'table{border-collapse:collapse;margin-top:18px;}' +
-      'th,td{padding:9px 14px;border-bottom:1px solid #e3e6f0;font-size:13px;text-align:left;white-space:nowrap;}' +
+      '.head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #4f46e5;padding-bottom:12px;}' +
+      '.brand{font-size:12px;color:#4f46e5;font-weight:700;}' +
+      'table{border-collapse:collapse;width:100%;margin-top:14px;}' +
+      'thead{display:table-header-group;}' +              // repite el encabezado en cada hoja
+      'th,td{padding:6px 10px;border-bottom:1px solid #e3e6f0;font-size:12px;text-align:left;}' +
       'th:first-child,td:first-child{padding-left:0;}th:last-child,td:last-child{padding-right:0;}' +
-      'th{background:#f5f6fb;text-transform:uppercase;font-size:11px;letter-spacing:.04em;color:#6b7390;}' +
-      '.cod{color:#6b7390;}.num{text-align:right;}.art{white-space:normal;}' +
-      '.head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #4f46e5;padding-bottom:14px;}' +
-      '.tot{margin-top:14px;text-align:right;font-size:15px;font-weight:700;}.brand{font-size:13px;color:#4f46e5;font-weight:700;}</style></head><body>' +
+      'th{background:#f5f6fb;text-transform:uppercase;font-size:10px;letter-spacing:.04em;color:#6b7390;}' +
+      '.cod{color:#6b7390;white-space:nowrap;}.num{text-align:right;white-space:nowrap;}.art{white-space:normal;}' +
+      'tr{page-break-inside:avoid;}' +                    // no parte una fila entre hojas
+      '.tot{margin-top:12px;text-align:right;font-size:14px;font-weight:700;}' +
+      '.foot{margin-top:18px;font-size:11px;color:#6b7390;}' +
+      '</style></head><body>' +
       '<div class="head"><div><div class="brand">PEDIDO SUGERIDO</div><h1>' + esc(meta.empresa || 'Mi Empresa') + '</h1>' +
       (meta.cliente ? '<div class="muted">Cliente: ' + esc(meta.cliente) + '</div>' : '') + '</div>' +
       '<div class="muted" style="text-align:right">Fecha: ' + fmtFecha(S.hoyISO()) + '</div></div>' +
-      '<div class="wrap"><table><thead><tr><th class="cod">Código</th><th class="art">Artículo</th><th class="num">Stock hoy</th>' +
+      '<table><thead><tr><th class="cod">Código</th><th class="art">Artículo</th><th class="num">Stock hoy</th>' +
       '<th class="num">Máximo</th><th class="num">A pedir</th></tr></thead>' +
       '<tbody>' + rows + '</tbody></table>' +
-      '<div class="tot">Total ' + unidadLbl() + ' a pedir: ' + fmtInt(totalU) + '</div></div>' +
-      '<p class="muted" style="margin-top:40px;font-size:12px;">Generado con StockRotativo · ' + fmtFecha(S.hoyISO()) + '</p>' +
+      '<div class="tot">Total ' + unidadLbl() + ' a pedir: ' + fmtInt(totalU) + '</div>' +
+      '<p class="foot">Generado con StockRotativo · ' + fmtFecha(S.hoyISO()) + '</p>' +
       '</body></html>';
     var w = window.open('', '_blank');
     if (!w) { toast('Permití las ventanas emergentes para imprimir', 'warn'); return; }
