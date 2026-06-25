@@ -842,8 +842,8 @@
 
   // Filas del catálogo real para sembrar osa_articulos (una sola vez).
   function seedRows() {
-    // OSA: el catálogo del seed son SOLO los artículos con máximo marcado.
-    return CATALOGO.filter(function (row) { return MAX_CAJAS[row[0]] != null; }).map(function (row) {
+    // OSA: se siembra el catálogo completo (todos los códigos del CATALOGO).
+    return CATALOGO.map(function (row) {
       var codigo = row[0], nombre = row[1], totalCajas = row[2];
       var uxc = uxcSeed(codigo);    // unidades por caja (Uni×Caja)
       var maxCajas = MAX_CAJAS[codigo];

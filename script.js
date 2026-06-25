@@ -499,10 +499,8 @@ function openOsaFormatChooser() {
   const f = getFormatoCliente();
   if (!m || !f) return;
   // Partes dinámicas según el cliente (OSA, Torres y Liva, …).
-  const nom = $("osaFormatCliente");
-  if (nom) nom.textContent = f.nombre;
   const lbl = $("osaFormatLinkLabel");
-  if (lbl) lbl.textContent = "Formato " + f.nombre;
+  if (lbl) lbl.textContent = "Pedido Automático";
   const link = $("osaFormatLink");
   if (link) link.setAttribute("href", f.page);
   m.classList.add("open");
@@ -790,7 +788,7 @@ async function refreshAuthState(sessionOverride) {
     if (_fmt) {
       _mi.setAttribute("href", _fmt.page);
       var _lbl = _mi.querySelector(".user-menu-label");
-      if (_lbl) _lbl.textContent = "Formato " + _fmt.nombre;
+      if (_lbl) _lbl.textContent = "Pedido Automático";
     }
   }
 
