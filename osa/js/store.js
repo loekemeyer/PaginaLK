@@ -842,7 +842,8 @@
 
   // Filas del catálogo real para sembrar osa_articulos (una sola vez).
   function seedRows() {
-    return CATALOGO.map(function (row) {
+    // OSA: el catálogo del seed son SOLO los artículos con máximo marcado.
+    return CATALOGO.filter(function (row) { return MAX_CAJAS[row[0]] != null; }).map(function (row) {
       var codigo = row[0], nombre = row[1], totalCajas = row[2];
       var uxc = uxcSeed(codigo);    // unidades por caja (Uni×Caja)
       var maxCajas = MAX_CAJAS[codigo];
@@ -860,7 +861,10 @@
     });
   }
   // Siembra el catálogo en Supabase (idempotente por id; no pisa lo ya cargado).
+  // clientSeed:false (p. ej. TyL, cuyo catálogo se siembra server-side desde su
+  // surtido de compras) → no sembrar desde el CATALOGO de OSA.
   function seedArticulos() {
+    if (CFG.clientSeed === false) return Promise.resolve({ data: [] });
     return sb.from(T.art).upsert(seedRows(), { onConflict: 'id', ignoreDuplicates: true });
   }
   // "Cargar catálogo de ejemplo" = re-sembrar el catálogo real (no borra movimientos).

@@ -115,12 +115,15 @@
       codCliente: 288,
       empresa: 'Loekemeyer',
       cliente: 'Torres y Liva',
-      seedInicial: false
+      seedInicial: false,
+      // El catálogo de TyL se siembra server-side (su surtido de compras 18m),
+      // no desde el catálogo de OSA.
+      clientSeed: false
     };
   </script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="../version.js?v=osa1"></script>
-  <script src="../osa/js/store.js?v=20260625-tyl"></script>
+  <script src="../osa/js/store.js?v=20260625-cat"></script>
   <script src="../osa/js/app.js?v=20260625-pa"></script>
 </body>
 </html>
