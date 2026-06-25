@@ -9,9 +9,19 @@
 
   var SUPABASE_URL = 'https://kwkclwhmoygunqmlegrg.supabase.co';
   var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3a2Nsd2htb3lndW5xbWxlZ3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1MjA2NzUsImV4cCI6MjA4NTA5NjY3NX0.soqPY5hfA3RkAJ9jmIms8UtEGUc4WpZztpEbmDijOgU';
-  var COD_CLIENTE = 2533;
+  // Config por cliente (la setea cada página en window.__formatoCfg ANTES de cargar
+  // este script). Default = OSA, para no cambiar nada de lo ya existente.
+  var CFG = window.__formatoCfg || {};
+  var PREFIX = CFG.prefix || 'osa';                 // prefijo de tablas: osa_* / tyl_* / …
+  var COD_CLIENTE = CFG.codCliente || 2533;         // cod_cliente del cliente
+  var SEED_INICIAL = CFG.seedInicial !== false;     // true: stock+ranking del seed; false: 0 (TyL)
+  // Nombres de tabla por cliente.
+  var T = {
+    art: PREFIX + '_articulos', ven: PREFIX + '_ventas', ent: PREFIX + '_entregas',
+    aju: PREFIX + '_ajustes', cfg: PREFIX + '_config'
+  };
   // Cliente supabase-js: misma URL/anon key/storage que el sitio → reusa la sesión
-  // del cliente OSA logueado en la página principal (misma origin).
+  // del cliente logueado en la página principal (misma origin).
   var sb = (window.supabase && window.supabase.createClient)
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
@@ -34,8 +44,8 @@
   function blank() {
     return {
       meta: {
-        empresa: 'Loekemeyer',
-        cliente: 'Osa Distribuidora SRL',
+        empresa: CFG.empresa || 'Loekemeyer',
+        cliente: CFG.cliente || 'Osa Distribuidora SRL',
         moneda: 'ARS',
         periodoMeses: 17,       // meses que abarca el total de ventas conocidas (base del promedio mensual)
         mesesPedidoDefault: 2,  // meses de cobertura deseados por defecto
@@ -93,7 +103,7 @@
       updated_at: new Date().toISOString()
     };
   }
-  function tablaDe(tipo) { return tipo === 'venta' ? 'osa_ventas' : (tipo === 'entrega' ? 'osa_entregas' : 'osa_ajustes'); }
+  function tablaDe(tipo) { return tipo === 'venta' ? T.ven : (tipo === 'entrega' ? T.ent : T.aju); }
   function movKey(tipo, dbId) { return (tipo === 'venta' ? 'V' : tipo === 'entrega' ? 'E' : 'A') + dbId; }
   function ventaRowToMov(r) { return { id: movKey('venta', r.id), dbId: r.id, tipo: 'venta', articuloId: r.articulo_id, cantidad: Math.round(num(r.unidades, 0)), fecha: r.fecha, nota: r.nota || '', quincena: r.quincena || null }; }
   function entregaRowToMov(r) { return { id: movKey('entrega', r.id), dbId: r.id, tipo: 'entrega', articuloId: r.articulo_id, cantidad: Math.round(num(r.unidades, 0)), fecha: r.fecha, nota: r.nota || '' }; }
@@ -112,7 +122,7 @@
       var u = Math.round(num(mov.cantidad, 0));
       base.unidades = u;
       base.cajas = a ? Math.round(u / uxcDe(a)) : u;
-      base.source = 'osa-app';
+      base.source = PREFIX + '-app';
       if (mov.tipo === 'venta') base.quincena = mov.quincena || null;
       else base.formato = mov._formato || null;
     }
@@ -132,7 +142,7 @@
   }
   function setMeta(patch) {
     state.meta = Object.assign(state.meta, patch);
-    if (sb) fire(sb.from('osa_config').upsert(metaToRow(), { onConflict: 'id' }));
+    if (sb) fire(sb.from(T.cfg).upsert(metaToRow(), { onConflict: 'id' }));
   }
 
   /* ---------- Unidades de visualización (cajas / unidades) ---------- */
@@ -141,7 +151,7 @@
   function getUnidadVista() { return state.meta.unidadVista === 'unidades' ? 'unidades' : 'cajas'; }
   function setUnidadVista(v) {
     state.meta.unidadVista = (v === 'unidades') ? 'unidades' : 'cajas';
-    if (sb) fire(sb.from('osa_config').upsert(metaToRow(), { onConflict: 'id' }));
+    if (sb) fire(sb.from(T.cfg).upsert(metaToRow(), { onConflict: 'id' }));
     return state.meta.unidadVista;
   }
   // Unidades por caja de un artículo (id u objeto). 1 si no se conoce.
@@ -163,7 +173,7 @@
       var a = matchCodigo(code, idx), u = Math.round(map[code]);
       if (a && u > 0 && a.uxc !== u) {
         a.uxc = u; n++;
-        if (sb) fire(sb.from('osa_articulos').update({ uxc: u, updated_at: new Date().toISOString() }).eq('id', a.id));
+        if (sb) fire(sb.from(T.art).update({ uxc: u, updated_at: new Date().toISOString() }).eq('id', a.id));
       }
     });
     return n;
@@ -200,7 +210,7 @@
       activo: data.activo !== false
     };
     state.articulos.push(a);
-    if (sb) fire(sb.from('osa_articulos').insert(artToRow(a)));
+    if (sb) fire(sb.from(T.art).insert(artToRow(a)));
     return a;
   }
   function updateArticulo(id, data) {
@@ -218,14 +228,14 @@
     if (data.promedioManual !== undefined) a.promedioManual = optNum(data.promedioManual);
     if (data.mesesPedido !== undefined) a.mesesPedido = optNum(data.mesesPedido);
     if (data.activo !== undefined) a.activo = !!data.activo;
-    if (sb) fire(sb.from('osa_articulos').update(artToRow(a)).eq('id', a.id));
+    if (sb) fire(sb.from(T.art).update(artToRow(a)).eq('id', a.id));
     return a;
   }
   function removeArticulo(id) {
     state.articulos = state.articulos.filter(function (a) { return a.id !== id; });
     state.movimientos = state.movimientos.filter(function (m) { return m.articuloId !== id; });
     // El FK on delete cascade borra las filas de ventas/entregas/ajustes del artículo.
-    if (sb) fire(sb.from('osa_articulos').delete().eq('id', id));
+    if (sb) fire(sb.from(T.art).delete().eq('id', id));
   }
 
   /* ---------- Movimientos ---------- */
@@ -625,7 +635,7 @@
       return a;
     });
     if (state.articulos.length) {
-      await sb.from('osa_articulos').upsert(state.articulos.map(artToRow), { onConflict: 'id' });
+      await sb.from(T.art).upsert(state.articulos.map(artToRow), { onConflict: 'id' });
     }
     // Movimientos por tipo (movToRow resuelve codigo/uxc desde state.articulos)
     var porTipo = { venta: [], entrega: [], ajuste: [] };
@@ -639,17 +649,17 @@
     for (var t in porTipo) { if (porTipo[t].length) await sb.from(tablaDe(t)).insert(porTipo[t]); }
     // Config
     state.meta = meta;
-    await sb.from('osa_config').upsert(metaToRow(), { onConflict: 'id' });
+    await sb.from(T.cfg).upsert(metaToRow(), { onConflict: 'id' });
     await loadAll();
   }
   // Borra todos los datos OSA (movimientos + artículos) en Supabase.
   function borrarTodo() {
     return Promise.all([
-      sb.from('osa_ventas').delete().eq('cod_cliente', COD_CLIENTE),
-      sb.from('osa_entregas').delete().eq('cod_cliente', COD_CLIENTE),
-      sb.from('osa_ajustes').delete().eq('cod_cliente', COD_CLIENTE)
+      sb.from(T.ven).delete().eq('cod_cliente', COD_CLIENTE),
+      sb.from(T.ent).delete().eq('cod_cliente', COD_CLIENTE),
+      sb.from(T.aju).delete().eq('cod_cliente', COD_CLIENTE)
     ]).then(function () {
-      return sb.from('osa_articulos').delete().eq('cod_cliente', COD_CLIENTE);
+      return sb.from(T.art).delete().eq('cod_cliente', COD_CLIENTE);
     });
   }
   // "Borrar todo": vacía movimientos y artículos y vuelve a sembrar el catálogo.
@@ -839,8 +849,10 @@
       return {
         id: 'a_' + codigo, cod_cliente: COD_CLIENTE, codigo: codigo, nombre: nombre, descripcion: '',
         precio: 0,
-        stock_inicial: STOCK_INICIAL[codigo] || 0,   // stock real (Existencia, informe 23/06/26)
-        total_historico: totalCajas * uxc,           // ventas conocidas EN UNIDADES (ranking en cajas × Uni×Caja)
+        // SEED_INICIAL=false (p. ej. TyL): catálogo y máximos precargados, pero
+        // stock inicial e historial de ventas arrancan en 0 (sin movimientos).
+        stock_inicial: SEED_INICIAL ? (STOCK_INICIAL[codigo] || 0) : 0,
+        total_historico: SEED_INICIAL ? (totalCajas * uxc) : 0,
         uxc: uxc,
         stock_maximo: (maxCajas != null) ? maxCajas * uxc : null, // nivel objetivo EN UNIDADES
         promedio_manual: null, meses_pedido: null, activo: true, foto: null
@@ -849,7 +861,7 @@
   }
   // Siembra el catálogo en Supabase (idempotente por id; no pisa lo ya cargado).
   function seedArticulos() {
-    return sb.from('osa_articulos').upsert(seedRows(), { onConflict: 'id', ignoreDuplicates: true });
+    return sb.from(T.art).upsert(seedRows(), { onConflict: 'id', ignoreDuplicates: true });
   }
   // "Cargar catálogo de ejemplo" = re-sembrar el catálogo real (no borra movimientos).
   async function loadDemo() {
@@ -913,9 +925,9 @@
     await loadMovimientos();
   }
   async function loadConfig() {
-    var r = await sb.from('osa_config').select('*').eq('id', 1).maybeSingle();
+    var r = await sb.from(T.cfg).select('*').eq('id', 1).maybeSingle();
     var c = r.data;
-    if (!c) { await sb.from('osa_config').upsert(metaToRow(), { onConflict: 'id' }); c = metaToRow(); }
+    if (!c) { await sb.from(T.cfg).upsert(metaToRow(), { onConflict: 'id' }); c = metaToRow(); }
     state.meta = {
       empresa: c.empresa || 'Loekemeyer', cliente: c.cliente || 'Osa Distribuidora SRL',
       moneda: c.moneda || 'ARS', periodoMeses: c.periodo_meses || 17,
@@ -925,16 +937,16 @@
     };
   }
   async function loadArticulos() {
-    var r = await sb.from('osa_articulos').select('*');
+    var r = await sb.from(T.art).select('*');
     var rows = r.data || [];
-    if (!rows.length) { await seedArticulos(); r = await sb.from('osa_articulos').select('*'); rows = r.data || []; }
+    if (!rows.length) { await seedArticulos(); r = await sb.from(T.art).select('*'); rows = r.data || []; }
     state.articulos = rows.map(rowToArt);
   }
   async function loadMovimientos() {
     var res = await Promise.all([
-      sb.from('osa_ventas').select('id,articulo_id,unidades,fecha,nota,quincena'),
-      sb.from('osa_entregas').select('id,articulo_id,unidades,fecha,nota'),
-      sb.from('osa_ajustes').select('id,articulo_id,cantidad,fecha,nota')
+      sb.from(T.ven).select('id,articulo_id,unidades,fecha,nota,quincena'),
+      sb.from(T.ent).select('id,articulo_id,unidades,fecha,nota'),
+      sb.from(T.aju).select('id,articulo_id,cantidad,fecha,nota')
     ]);
     state.movimientos = []
       .concat((res[0].data || []).map(ventaRowToMov))

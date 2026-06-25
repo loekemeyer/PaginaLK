@@ -21,7 +21,7 @@
       : null);
   var SHEETS_PROXY_URL = 'https://kwkclwhmoygunqmlegrg.functions.supabase.co/sheets-proxy';
   var SHEETS_ENTREGAS_PROXY_URL = 'https://kwkclwhmoygunqmlegrg.functions.supabase.co/sheets-entregas-proxy';
-  var LK_CLIENTE = 2533;   // código de OSA en el sistema de Loekemeyer
+  var LK_CLIENTE = (window.__formatoCfg && window.__formatoCfg.codCliente) || 2533; // cod del cliente del formato
   var LK_VEND = 7;         // vendedor
   // Forma de pago del pedido OSA: Contado -25% (decisión de Loekemeyer).
   var OSA_PAGO_TEXT = 'Pago Contado: 25% Dto';

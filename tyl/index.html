@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>StockRotativo · Gestión de stock en consignación</title>
-  <meta name="description" content="Sistema simple y visual para gestionar stock rotativo / consignación: entregas, ventas y pedidos automáticos de reposición." />
+  <title>StockRotativo · Torres y Liva</title>
+  <meta name="description" content="Gestión de stock rotativo / consignación: entregas, ventas y pedidos automáticos de reposición." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23b00020'/%3E%3Cpath d='M28 36l22-12 22 12-22 12z' fill='white' opacity='.95'/%3E%3Cpath d='M28 36v28l22 12V48z' fill='white' opacity='.7'/%3E%3Cpath d='M72 36v28L50 76V48z' fill='white' opacity='.5'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/styles.css?v=20260625-lk2" />
+  <link rel="stylesheet" href="../osa/css/styles.css?v=20260625-lk2" />
 </head>
 <body>
   <div class="app" id="app">
@@ -49,7 +49,7 @@
         </a>
         <a class="nav__item" data-view="ventas" href="#/ventas">
           <svg class="ic" viewBox="0 0 24 24"><path d="M7 18a2 2 0 1 0 .001 4.001A2 2 0 0 0 7 18zm10 0a2 2 0 1 0 .001 4.001A2 2 0 0 0 17 18zM6.2 4l.94 2H20a1 1 0 0 1 .96 1.27l-2.4 8.3A2 2 0 0 1 16.64 17H8.53a2 2 0 0 1-1.94-1.5L4.27 6.5 3.6 4H6.2z"/></svg>
-          <span>Ventas OSA</span>
+          <span>Ventas</span>
         </a>
         <a class="nav__item" data-view="cargas" href="#/cargas">
           <svg class="ic" viewBox="0 0 24 24"><path d="M7 2v2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2H7zm12 7v10H5V9h14zM7 11v2h2v-2H7zm4 0v2h2v-2h-2zm4 0v2h2v-2h-2z"/></svg>
@@ -107,12 +107,20 @@
   <!-- Toasts -->
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
-  <!-- Supabase JS: reusa la sesión del sitio (misma origin) para mandar el pedido
-       como uno normal (submit_order_fast + sheets) y guardar ventas/entregas. -->
+  <!-- Config del formato para Torres y Liva (cod 288). Catálogo y máximos
+       precargados, stock inicial y movimientos en 0 (seedInicial:false). -->
+  <script>
+    window.__formatoCfg = {
+      prefix: 'tyl',
+      codCliente: 288,
+      empresa: 'Loekemeyer',
+      cliente: 'Torres y Liva',
+      seedInicial: false
+    };
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <!-- Versión unificada con el sitio (window.APP_VERSION) -->
   <script src="../version.js?v=osa1"></script>
-  <script src="js/store.js?v=20260625-multi"></script>
-  <script src="js/app.js?v=20260625-multi"></script>
+  <script src="../osa/js/store.js?v=20260625-tyl"></script>
+  <script src="../osa/js/app.js?v=20260625-tyl"></script>
 </body>
 </html>

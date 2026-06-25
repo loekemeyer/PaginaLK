@@ -127,18 +127,21 @@ function isListPriceOnlyClient() {
   return isAdmin || String(customerProfile?.cod_cliente) === "5000";
 }
 
-// Cliente especial OSA (Osa Distribuidora SRL): puede elegir entre el formato
-// regular de la página y el "Formato OSA" (gestión de stock en consignación,
-// en /osa/). Su código en el sistema de Loekemeyer es 2533 y se loguea con su
-// CUIT 30715175017 (→ email sintético 30715175017@cuit.loekemeyer). Se gatea por
-// cualquiera de los dos para no depender de un único campo.
-const OSA_COD_CLIENTE = "2533";
-const OSA_CUIT = "30715175017"; // solo dígitos
-function isOsaClient() {
+// Clientes con "Formato" propio (gestión de stock en consignación): pueden elegir
+// entre el formato regular de la página y su formato especial. Se gatea por
+// cod_cliente o CUIT (lo que matchee). Para sumar un cliente, agregar acá su
+// entrada + sus tablas <prefix>_* + su página <prefix>/index.html con la config.
+const FORMATO_CLIENTES = [
+  { cod: "2533", cuit: "30715175017", nombre: "OSA", page: "osa/index.html" },
+  { cod: "288",  cuit: "33534724239", nombre: "Torres y Liva", page: "tyl/index.html" },
+];
+// Devuelve la config de formato del cliente logueado (o null si no tiene).
+function getFormatoCliente() {
   const cod = String(customerProfile?.cod_cliente || "").trim();
   const cuit = String(customerProfile?.cuit || "").replace(/\D/g, "");
-  return cod === OSA_COD_CLIENTE || cuit === OSA_CUIT;
+  return FORMATO_CLIENTES.find((f) => f.cod === cod || f.cuit === cuit) || null;
 }
+function isFormatoCliente() { return !!getFormatoCliente(); }
 
 const cart = []; // [{ productId: uuidString, qtyCajas }]
 
@@ -489,11 +492,19 @@ function closeLogin() {
 /***********************
  * SELECTOR DE FORMATO (cliente OSA · 2533)
  ***********************/
-const OSA_FORMAT_PREF_KEY = "osa_format_pref"; // 'regular' | 'osa'
+const OSA_FORMAT_PREF_KEY = "lk_format_pref"; // 'regular' | 'formato'
 
 function openOsaFormatChooser() {
   const m = $("osaFormatModal");
-  if (!m) return;
+  const f = getFormatoCliente();
+  if (!m || !f) return;
+  // Partes dinámicas según el cliente (OSA, Torres y Liva, …).
+  const nom = $("osaFormatCliente");
+  if (nom) nom.textContent = f.nombre;
+  const lbl = $("osaFormatLinkLabel");
+  if (lbl) lbl.textContent = "Formato " + f.nombre;
+  const link = $("osaFormatLink");
+  if (link) link.setAttribute("href", f.page);
   m.classList.add("open");
   m.setAttribute("aria-hidden", "false");
 }
@@ -505,35 +516,34 @@ function closeOsaFormatChooser() {
   m.setAttribute("aria-hidden", "true");
 }
 
-// Guarda la última preferencia de formato (sin redirigir). "Formato OSA" navega
-// solo (es un <a href="osa/index.html">); el formato regular cierra el modal.
+// Guarda la última preferencia de formato (sin redirigir). El formato del cliente
+// navega solo (el <a> tiene el href que setea openOsaFormatChooser); regular cierra.
 function recordarFormato(which) {
   try {
-    localStorage.setItem(OSA_FORMAT_PREF_KEY, which === "osa" ? "osa" : "regular");
+    localStorage.setItem(OSA_FORMAT_PREF_KEY, which === "regular" ? "regular" : "formato");
   } catch (e) {}
 }
 
 function elegirFormato(which) {
   recordarFormato(which);
-  if (which === "osa") {
-    window.location.href = "osa/index.html";
-    return;
+  if (which !== "regular") {
+    const f = getFormatoCliente();
+    if (f) { window.location.href = f.page; return; }
   }
   closeOsaFormatChooser();
 }
 
-// Muestra el selector de formato cuando entra OSA: en un login nuevo (force) y
-// también cuando abre la página ya logueado. Una vez por sesión de navegador
-// (sessionStorage) para no reabrirlo en cada recarga; siempre accesible además
-// desde el menú de usuario → "Formato OSA".
+// Muestra el selector cuando entra un cliente con formato propio: en un login
+// nuevo (force) y también al abrir ya logueado. Una vez por sesión de navegador;
+// siempre accesible además desde el menú de usuario → "Formato <cliente>".
 function maybeShowOsaFormatChooser(opts) {
   opts = opts || {};
-  if (!isOsaClient()) return;
+  if (!isFormatoCliente()) return;
   const modal = $("osaFormatModal");
   if (modal && modal.classList.contains("open")) return; // ya está abierto
   try {
-    if (!opts.force && sessionStorage.getItem("osa_chooser_seen") === "1") return;
-    sessionStorage.setItem("osa_chooser_seen", "1");
+    if (!opts.force && sessionStorage.getItem("lk_chooser_seen") === "1") return;
+    sessionStorage.setItem("lk_chooser_seen", "1");
   } catch (e) {}
   openOsaFormatChooser();
 }
@@ -772,9 +782,17 @@ async function refreshAuthState(sessionOverride) {
   if ($("menuAdminPanel"))
     $("menuAdminPanel").style.display = isLoekemeyerAdmin ? "block" : "none";
 
-  // Acceso al "Formato OSA": solo el cliente OSA (cod_cliente 2533).
-  if ($("menuFormatoOsa"))
-    $("menuFormatoOsa").style.display = isOsaClient() ? "block" : "none";
+  // Acceso al "Formato <cliente>": solo clientes con formato propio (OSA, TyL…).
+  if ($("menuFormatoOsa")) {
+    var _fmt = getFormatoCliente();
+    var _mi = $("menuFormatoOsa");
+    _mi.style.display = _fmt ? "block" : "none";
+    if (_fmt) {
+      _mi.setAttribute("href", _fmt.page);
+      var _lbl = _mi.querySelector(".user-menu-label");
+      if (_lbl) _lbl.textContent = "Formato " + _fmt.nombre;
+    }
+  }
 
   // Admin: ocultar "Análisis de tus compras" (es de cliente)
   if ($("menuAnalisis"))
