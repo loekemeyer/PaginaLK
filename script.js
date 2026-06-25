@@ -129,10 +129,15 @@ function isListPriceOnlyClient() {
 
 // Cliente especial OSA (Osa Distribuidora SRL): puede elegir entre el formato
 // regular de la página y el "Formato OSA" (gestión de stock en consignación,
-// en /osa/). Su código en el sistema de Loekemeyer es 2533.
+// en /osa/). Su código en el sistema de Loekemeyer es 2533 y se loguea con su
+// CUIT 30715175017 (→ email sintético 30715175017@cuit.loekemeyer). Se gatea por
+// cualquiera de los dos para no depender de un único campo.
 const OSA_COD_CLIENTE = "2533";
+const OSA_CUIT = "30715175017"; // solo dígitos
 function isOsaClient() {
-  return String(customerProfile?.cod_cliente || "").trim() === OSA_COD_CLIENTE;
+  const cod = String(customerProfile?.cod_cliente || "").trim();
+  const cuit = String(customerProfile?.cuit || "").replace(/\D/g, "");
+  return cod === OSA_COD_CLIENTE || cuit === OSA_CUIT;
 }
 
 const cart = []; // [{ productId: uuidString, qtyCajas }]
