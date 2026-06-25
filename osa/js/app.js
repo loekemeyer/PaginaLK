@@ -48,7 +48,7 @@
   var VIEWS = {
     stocks:      { title: 'Stocks', sub: 'Stock de hoy y pedido sugerido por artículo' },
     movimientos: { title: 'Movimientos', sub: 'Inicial + entregas − ventas = stock hoy. Tocá un artículo para ver el detalle.' },
-    puntopedido: { title: 'Punto de pedido', sub: 'Máximo objetivo por artículo · pedido sugerido = máximo − stock actual' },
+    puntopedido: { title: 'Máximos por Código', sub: 'Máximo objetivo (en cajas) por artículo · pedido sugerido = máximo − stock actual' },
     entregas:    { title: 'Entregas Loeke', sub: 'Mercadería que Loeke entrega a OSA (entra al stock)' },
     ventas:      { title: 'Ventas OSA', sub: 'Ventas de OSA a sus clientes (salen del stock)' },
     cargas:      { title: 'Control de cargas', sub: 'Ventas de OSA por quincena: cargadas y pendientes' },
@@ -485,7 +485,6 @@
     var stocks = S.computeStocks();
     html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr>' +
       '<th>Artículo</th><th class="num">Stock hoy <span class="muted">(' + uc + ')</span></th>' +
-      '<th class="num">Consumo/mes <span class="muted">(' + uc + ')</span></th>' +
       '<th class="num">Máximo <span class="muted">(' + uc + ')</span></th>' +
       '<th class="num">Sugerido <span class="muted">(' + uc + ')</span></th></tr></thead><tbody>';
     arts.forEach(function (a) {
@@ -495,7 +494,6 @@
       html += '<tr data-rowp="' + a.id + '" data-search="' + esc((a.nombre + ' ' + (a.codigo || '')).toLowerCase()) + '">' +
         '<td><div class="cell-art">' + imgTag(a) + '<div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
         '<td class="num"><strong>' + qf(Math.max(0, stock), a) + '</strong></td>' +
-        '<td class="num muted">' + qf(S.promedioMensual(a), a) + '</td>' +
         '<td class="num"><input class="qty-input" type="number" min="0" step="1" value="' + maxView + '" placeholder="—" data-max="' + a.id + '"></td>' +
         '<td class="num" data-sug="' + a.id + '">' + (sg > 0 ? '<span class="badge badge--warn">+' + qf(sg, a) + '</span>' : '—') + '</td>' +
         '</tr>';
@@ -983,8 +981,8 @@
       'body{font-family:Inter,Arial,sans-serif;color:#1c2233;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}' +
       'h1{font-size:20px;margin:0 0 2px;}' +
       '.muted{color:#6b7390;}' +
-      '.head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #4f46e5;padding-bottom:12px;}' +
-      '.brand{font-size:12px;color:#4f46e5;font-weight:700;}' +
+      '.head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #b00020;padding-bottom:12px;}' +
+      '.brand{font-size:12px;color:#b00020;font-weight:700;}' +
       'table{border-collapse:collapse;width:100%;margin-top:14px;}' +
       'thead{display:table-header-group;}' +              // repite el encabezado en cada hoja
       'th,td{padding:6px 10px;border-bottom:1px solid #e3e6f0;font-size:12px;text-align:left;}' +

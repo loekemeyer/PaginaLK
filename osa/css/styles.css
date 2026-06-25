@@ -15,10 +15,10 @@
   --muted: #6b7390;
   --muted-2: #9aa1bb;
 
-  --primary: #4f46e5;
-  --primary-600: #4338ca;
-  --primary-50: #eef0fe;
-  --primary-grad: linear-gradient(160deg, #5b54f0 0%, #7c3aed 100%);
+  --primary: #b00020;
+  --primary-600: #8a0019;
+  --primary-50: #fbe9ec;
+  --primary-grad: linear-gradient(160deg, #2a2a2a 0%, #111 100%);
 
   --ok: #10b981;
   --ok-bg: #e7f8f1;
@@ -174,7 +174,7 @@ svg { display: block; }
 .btn svg { width: 18px; height: 18px; fill: currentColor; }
 .btn:hover { transform: translateY(-1px); }
 .btn:active { transform: translateY(0); }
-.btn--primary { background: var(--primary); color: #fff; box-shadow: 0 6px 16px rgba(79,70,229,.30); }
+.btn--primary { background: var(--primary); color: #fff; box-shadow: 0 6px 16px rgba(176,0,32,.28); }
 .btn--primary:hover { background: var(--primary-600); }
 .btn--ghost { background: var(--surface); border-color: var(--line-strong); color: var(--text); box-shadow: var(--shadow-sm); }
 .btn--ghost:hover { border-color: var(--muted-2); }
@@ -317,7 +317,7 @@ svg { display: block; }
 .sucbar__btns { display: flex; gap: 8px; flex-wrap: wrap; }
 .sucbtn { padding: 9px 16px; border-radius: 10px; border: 1.5px solid var(--line-strong); background: var(--surface-2); color: var(--text); font: inherit; font-weight: 600; font-size: 13.5px; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
 .sucbtn:hover { border-color: var(--primary); color: var(--primary); }
-.sucbtn.is-active { background: var(--primary); border-color: var(--primary); color: #fff; box-shadow: 0 4px 12px rgba(79,70,229,.30); }
+.sucbtn.is-active { background: var(--primary); border-color: var(--primary); color: #fff; box-shadow: 0 4px 12px rgba(176,0,32,.28); }
 .ranking { max-width: 680px; }
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table th, .table td { padding: 13px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: middle; }
