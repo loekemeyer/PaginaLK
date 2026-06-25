@@ -1466,9 +1466,8 @@
       toast('No se pudo guardar en Supabase. Revisá tu conexión / sesión.', 'danger');
     });
 
-    pantalla('Cargando…', 'Trayendo tus datos desde Supabase.', '');
     try {
-      await S.init(); // hidrata el estado desde Supabase (requiere sesión OSA)
+      await S.init(); // hidrata el estado (requiere sesión OSA); carga en silencio
     } catch (e) {
       if (e && e.message === 'no-session') {
         pantalla('Iniciá sesión',
