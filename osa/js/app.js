@@ -6,16 +6,27 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.4.2';
-  // ----- Integración Loekemeyer (envío del pedido sugerido) -----
+  var APP_VERSION = '1.5.0';
+  // ----- Integración Loekemeyer -----
+  // El pedido de OSA se envía como un pedido normal del sitio (submit_order_fast
+  // + sheets-proxy + sheets-entregas-proxy) reusando la sesión del cliente OSA
+  // que ya está logueado en la página principal (misma origin → misma sesión).
   var SUPABASE_URL = 'https://kwkclwhmoygunqmlegrg.supabase.co';
-  var SUPABASE_KEY = 'sb_publishable_mVX5MnjwM770cNjgiL6yLw_LDNl9pML'; // publishable: segura para el front
-  // URL del Apps Script (Web App) que escribe en el Sheet "Pedidos LK". Precargada;
-  // se puede sobrescribir desde Configuración → Integración Loekemeyer.
-  var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyVafQeHdk-W-CnzWH_AZPZzbfMM2CI7PaCFdNQtdWJXY99WFMxIrtI6LAQ1zSf7FVM/exec';
-  var LK_CLIENTE = 2533;   // código de OSA en el sistema de Loekemeyer (col C)
-  var LK_VEND = 7;         // vendedor (col D)
-  var LK_COND_PAGO = 18;   // condición de pago (col I)
+  // anon key (mismo que el sitio): permite reusar la sesión guardada y respeta RLS.
+  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3a2Nsd2htb3lndW5xbWxlZ3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1MjA2NzUsImV4cCI6MjA4NTA5NjY3NX0.soqPY5hfA3RkAJ9jmIms8UtEGUc4WpZztpEbmDijOgU';
+  // Cliente supabase-js: misma URL/anon key/storage que el sitio → toma la sesión
+  // del cliente logueado sin re-login.
+  var sb = (window.supabase && window.supabase.createClient)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
+  var SHEETS_PROXY_URL = 'https://kwkclwhmoygunqmlegrg.functions.supabase.co/sheets-proxy';
+  var SHEETS_ENTREGAS_PROXY_URL = 'https://kwkclwhmoygunqmlegrg.functions.supabase.co/sheets-entregas-proxy';
+  var LK_CLIENTE = 2533;   // código de OSA en el sistema de Loekemeyer
+  var LK_VEND = 7;         // vendedor
+  // Forma de pago del pedido OSA: Contado -25% (decisión de Loekemeyer).
+  var OSA_PAGO_TEXT = 'Pago Contado: 25% Dto';
+  var OSA_PAGO_CODE = 8;
+  var OSA_PAGO_DISCOUNT = 0.25;
   var LK_SUCURSALES = [
     { val: 'Zuviria 5352- Villa Lugano', lbl: 'Villa Lugano' }, // default
     { val: 'Puente del Inca 2450 - Ezeiza', lbl: 'Ezeiza' },
@@ -756,6 +767,22 @@
         .map(function (d) { return { articuloId: d.art.id, tipo: 'venta', cantidad: d.f.ventas, fecha: fech, nota: nota, quincena: qk }; });
       if (!batch.length) { toast('No hay ventas para importar', 'warn'); return; }
       S.addMovimientosBatch(batch);
+      // Guardar las ventas en Supabase (osa_ventas), además del localStorage.
+      var ventasOk = detalle.filter(function (d) { return d.art && d.f.ventas > 0; });
+      osaPersistLineas('osa_ventas',
+        ventasOk.map(function (d) { return d.art.codigo; }),
+        function (map) {
+          return ventasOk.map(function (d) {
+            var p = map[String(d.art.codigo || '').trim().toUpperCase()];
+            return {
+              cod_cliente: LK_CLIENTE, codigo: d.art.codigo, product_id: p ? p.id : null,
+              nombre: d.art.nombre, unidades: d.f.ventas, cajas: d.cajas,
+              fecha: fech, quincena: qk,
+              periodo_desde: r.periodo.desde || null, periodo_hasta: r.periodo.hasta || null,
+              source: 'osa-app'
+            };
+          });
+        });
       closeModal();
       toast('Importadas ' + batch.length + ' ventas (' + fmtInt(r.totalParseado) + ' u / ' + fmtInt(totalCajas) + ' cajas)', 'ok');
       var pend = S.pedidoSugerido().length;
@@ -842,10 +869,39 @@
         .map(function (f) { return { articuloId: f.articuloId, tipo: 'entrega', cantidad: f.unidades, fecha: f.fecha || S.hoyISO(), nota: nota }; });
       if (!batch.length) { toast('No hay entregas para registrar', 'warn'); return; }
       S.addMovimientosBatch(batch);
+      // Guardar las entregas en Supabase (osa_entregas), además del localStorage.
+      var entOk = r.filas.filter(function (f) { return f.articuloId && f.unidades > 0; });
+      osaPersistLineas('osa_entregas',
+        entOk.map(function (f) { var a = S.getArticulo(f.articuloId); return (a && a.codigo) || f.codigo; }),
+        function (map) {
+          return entOk.map(function (f) {
+            var a = S.getArticulo(f.articuloId);
+            var cod = (a && a.codigo) || f.codigo;
+            var p = map[String(cod || '').trim().toUpperCase()];
+            return {
+              cod_cliente: LK_CLIENTE, codigo: cod, product_id: p ? p.id : null,
+              nombre: (a && a.nombre) || f.nombre, unidades: f.unidades, cajas: f.cajas,
+              uxc: f.uxc, fecha: f.fecha || S.hoyISO(), formato: r.formato, source: 'osa-app'
+            };
+          });
+        });
       closeModal();
       toast('Registradas ' + batch.length + ' entregas (' + fmtInt(r.totalUnidades) + ' u / ' + fmtInt(r.totalCajas) + ' cajas)', 'ok');
       render();
     });
+  }
+
+  // Persiste líneas en una tabla Supabase (osa_ventas / osa_entregas). Best-effort:
+  // requiere sesión OSA (RLS); si no hay, el dato igual queda en localStorage.
+  function osaPersistLineas(tabla, codigos, buildRows) {
+    if (!sb) return;
+    osaResolveProducts(codigos).then(function (map) {
+      var rows = (buildRows(map) || []).filter(Boolean);
+      if (!rows.length) return;
+      sb.from(tabla).insert(rows).then(function (res) {
+        if (res.error) console.warn(tabla + ' insert error:', res.error.message);
+      });
+    }).catch(function (e) { console.warn(tabla + ' persist error:', e); });
   }
 
   function openAjuste() {
@@ -1080,71 +1136,196 @@
     });
   }
 
-  // Paso 2: manda el pedido ya revisado al Sheet + Supabase.
-  function confirmarEnvioLoeke(pedido) {
+  // Paso 2: manda el pedido como un pedido NORMAL del sitio:
+  // submit_order_fast (orders/order_items) + sheets-proxy + sheets-entregas-proxy,
+  // reusando la sesión del cliente OSA logueado en la página principal.
+  async function confirmarEnvioLoeke(pedido) {
     if (!pedido.items.length) { toast('No hay nada para reponer', 'info'); return; }
-    var m = S.getMeta();
-    var url = m.appsScriptUrl || APPS_SCRIPT_URL; // default precargado; Config lo puede sobrescribir
-    if (!url) {
-      toast('Falta la URL del Apps Script (Configuración → Integración Loekemeyer)', 'warn');
-      setView('config'); return;
-    }
+    if (!sb) { toast('No se pudo cargar Supabase. Recargá la página.', 'danger'); return; }
     toast('Enviando pedido a Loekemeyer…', 'info');
-    // 1) N° de pedido del contador COMPARTIDO con la web (orders_id_seq, vía RPC, CORS ok).
-    obtenerNumeroPedido().then(function (numero) {
-      pedido.numero = numero; // si la RPC falla queda null y el Apps Script cae a máx+1
-      guardarEnSupabase(pedido, numero); // copia best-effort (Supabase REST tiene CORS)
-      // 2) Apps Script -> Sheet "Pedidos LK". El /exec NO expone cabeceras CORS legibles,
-      //    así que va en no-cors (mandar y listo); el N° ya lo tenemos del contador.
-      return fetch(url, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(pedido)
+    try {
+      // 1) Sesión: reusa el login del sitio (misma origin). Si no hay, mandar a loguear.
+      var sess = (await sb.auth.getSession()).data.session;
+      if (!sess) {
+        toast('Iniciá sesión en la página principal para enviar el pedido.', 'warn');
+        setTimeout(function () { window.location.href = '../mayorista.html'; }, 1600);
+        return;
+      }
+      var authUserId = sess.user.id;
+
+      // 2) Perfil del cliente (OSA).
+      var prof = (await sb.from('customers')
+        .select('id,business_name,cod_cliente,cuit,vend,dto_vol,debt,credit_limit,payment_term')
+        .eq('auth_user_id', authUserId).maybeSingle()).data;
+      if (!prof) { toast('No encontré tu perfil de cliente. Reingresá en la página.', 'danger'); return; }
+
+      // 3) Mapear códigos del pedido → productos del catálogo (id, uxb, precio).
+      var prodMap = await osaResolveProducts(pedido.items.map(function (it) { return it.cod; }));
+
+      // 4) Items + totales (Contado -25% + descuento web + dto x volumen).
+      var dtoVol = Number(prof.dto_vol || 0);
+      var webDisc = await osaWebDiscount();
+      var rpcItems = [], sheetItems = [], subtotal = 0, noMap = [];
+      pedido.items.forEach(function (it) {
+        var p = prodMap[String(it.cod || '').trim().toUpperCase()];
+        if (!p) { noMap.push(it.cod); return; }
+        var uxb = Number(p.uxb || 0);
+        var cajas = Math.max(0, Math.round(Number(it.cajas || 0)));
+        if (cajas <= 0) return;
+        var yourUnit = Number(p.list_price || 0) * (1 - dtoVol);
+        subtotal += yourUnit * cajas * uxb;
+        rpcItems.push({ product_id: p.id, cajas: cajas, uxb: uxb, is_loke: false });
+        sheetItems.push({ cod_art: String(p.cod || '').trim(), cajas: cajas, uxb: uxb, description: p.description || '' });
       });
-    })
-      .then(function () {
-        toast(pedido.numero
-          ? ('Pedido N° ' + pedido.numero + ' enviado (' + pedido.items.length + ' artículos)')
-          : ('Pedido enviado (' + pedido.items.length + ' artículos)'), 'ok');
-      })
-      .catch(function (err) {
-        toast('No se pudo enviar: ' + (err && err.message ? err.message : err), 'warn');
+      if (!rpcItems.length) {
+        toast('No pude mapear ningún artículo a un producto del catálogo.', 'danger');
+        return;
+      }
+      var finalTotal = subtotal * (1 - webDisc) * (1 - OSA_PAGO_DISCOUNT);
+
+      // 5) Crear el pedido (mismo RPC que el sitio).
+      var rpc = await sb.rpc('submit_order_fast', {
+        p_auth_user_id: authUserId,
+        p_customer_id: prof.id,
+        p_status: 'pendiente',
+        p_payment_method: OSA_PAGO_TEXT,
+        p_payment_discount: OSA_PAGO_DISCOUNT,
+        p_web_discount: webDisc,
+        p_subtotal: subtotal,
+        p_total: finalTotal,
+        p_items: rpcItems
+      });
+      if (rpc.error || !rpc.data) {
+        throw new Error((rpc.error && (rpc.error.message || rpc.error.details)) || 'submit_order_fast falló');
+      }
+      var orderId = rpc.data;
+
+      // 6) Sheets (mismos payloads que el sitio).
+      var debt = Number(prof.debt || 0);
+      var creditLimit = prof.credit_limit == null ? null : Number(prof.credit_limit);
+      var lcStatus = (creditLimit != null && (debt + finalTotal) > creditLimit) ? 'X' : 'OK';
+      var dStatus = debt > 0 ? 'X' : 'OK';
+      var ppStatus = prof.payment_term == null ? 'Null' : String(Number(prof.payment_term));
+      var suc = pedido.sucursal || (S.getMeta().sucursalLK || LK_SUCURSALES[0].val);
+
+      var sheetsPayload = {
+        order_number: String(orderId).trim(),
+        cod_cliente: String(prof.cod_cliente || '').trim(),
+        vend: String(prof.vend || '').trim(),
+        condicion_pago: OSA_PAGO_TEXT,
+        condicion_pago_code: OSA_PAGO_CODE,
+        sucursal_entrega: suc,
+        cliente_nuevo: '',
+        is_promo: false,
+        extra_discount: 0,
+        deuda: debt,
+        credit_limit: creditLimit,
+        payment_term: prof.payment_term == null ? null : Number(prof.payment_term),
+        lc: lcStatus, d: dStatus, pp: ppStatus,
+        order_total: finalTotal,
+        source: 'Web',
+        mode: 'new',
+        items: sheetItems.map(function (it) { return { cod_art: it.cod_art, cajas: it.cajas, uxb: it.uxb }; })
+      };
+
+      sb.from('orders').update({ sheets_payload: sheetsPayload, is_promo: false, extra_discount: 0 })
+        .eq('id', orderId).then(function () {});
+      osaSendSheets(sess.access_token, sheetsPayload)
+        .then(function () { sb.from('orders').update({ sheets_sent: true }).eq('id', orderId).then(function () {}); })
+        .catch(function (e) { console.warn('Sheets error (order ' + orderId + '):', e); });
+
+      var entregasPayload = {
+        order_number: orderId,
+        fecha: new Date().toLocaleDateString('es-AR'),
+        cod_cliente: prof.cod_cliente,
+        cliente: prof.business_name,
+        vendedor: prof.vend || '',
+        direccion_entrega: suc,
+        barrio_entrega: '',
+        empresa: 'LK',
+        is_promo: false,
+        extra_discount: 0,
+        mode: 'new',
+        items: sheetItems.map(function (it) { return { cod_art: it.cod_art, description: it.description || '', cajas: it.cajas, uxb: it.uxb }; })
+      };
+      osaSendEntregasSheet(sess.access_token, entregasPayload);
+
+      toast('Pedido N° ' + orderId + ' enviado (' + rpcItems.length + ' artículos)', 'ok');
+      if (noMap.length) {
+        setTimeout(function () {
+          toast(noMap.length + ' código(s) sin producto, no enviados: ' + noMap.join(', '), 'warn');
+        }, 900);
+      }
+    } catch (err) {
+      toast('No se pudo enviar: ' + (err && err.message ? err.message : err), 'danger');
+    }
+  }
+
+  // Lee el descuento web (app_settings.web_order_discount, fallback 0.02).
+  function osaWebDiscount() {
+    return sb.from('app_settings').select('value').eq('key', 'web_order_discount').single()
+      .then(function (r) { return (r.data && Number(r.data.value)) || 0.02; })
+      .catch(function () { return 0.02; });
+  }
+
+  // Mapa CÓDIGO(MAYÚSCULAS) → producto, tolerando la variante con/sin "E".
+  function osaResolveProducts(codes) {
+    var wanted = [];
+    codes.forEach(function (c) {
+      var u = String(c || '').trim().toUpperCase();
+      if (!u) return;
+      wanted.push(u);
+      wanted.push(/E$/.test(u) ? u.replace(/E$/, '') : u + 'E');
+    });
+    wanted = wanted.filter(function (v, i, a) { return v && a.indexOf(v) === i; });
+    if (!wanted.length) return Promise.resolve({});
+    return sb.from('products').select('id,cod,uxb,list_price,description').in('cod', wanted)
+      .then(function (r) {
+        var byCod = {};
+        (r.data || []).forEach(function (p) { byCod[String(p.cod || '').trim().toUpperCase()] = p; });
+        var map = {};
+        codes.forEach(function (c) {
+          var u = String(c || '').trim().toUpperCase();
+          map[u] = byCod[u] || byCod[u.replace(/E$/, '')] || byCod[u + 'E'] || null;
+        });
+        return map;
       });
   }
 
-  // Próximo N° de pedido desde el contador compartido con la web (RPC sobre orders_id_seq).
-  // Devuelve null si falla (entonces el Apps Script usa máx+1 como respaldo).
-  function obtenerNumeroPedido() {
-    return fetch(SUPABASE_URL + '/rest/v1/rpc/osa_next_pedido_number', {
+  // sheets-proxy (pedidos). Authorization: Bearer access_token; hasta 3 intentos.
+  function osaSendSheets(token, payload, attempt) {
+    attempt = attempt || 1;
+    return fetch(SHEETS_PROXY_URL, {
       method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: '{}'
-    }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify(payload)
+    }).then(function (resp) {
+      return resp.json().catch(function () { return {}; }).then(function (data) {
+        if (!resp.ok || (data && data.ok === false)) {
+          throw new Error((data && data.error) || ('Proxy error ' + resp.status));
+        }
+        return { ok: true };
+      });
+    }).catch(function (e) {
+      if (attempt < 3) {
+        return new Promise(function (res) { setTimeout(res, 1200); })
+          .then(function () { return osaSendSheets(token, payload, attempt + 1); });
+      }
+      throw e;
+    });
   }
 
-  // Copia del pedido en Supabase (tabla aislada osa_reposicion). Best-effort.
-  function guardarEnSupabase(pedido, numeroPedido) {
-    fetch(SUPABASE_URL + '/rest/v1/osa_reposicion', {
+  // sheets-entregas-proxy (Base Picking). Bearer access_token + apikey anon. Best-effort.
+  function osaSendEntregasSheet(token, payload) {
+    return fetch(SHEETS_ENTREGAS_PROXY_URL, {
       method: 'POST',
       headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
         'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
+        'Authorization': 'Bearer ' + (token || SUPABASE_ANON_KEY),
+        'apikey': SUPABASE_ANON_KEY
       },
-      body: JSON.stringify({
-        numero_pedido: (numeroPedido != null ? numeroPedido : null),
-        cliente: pedido.cliente, vend: pedido.vend, sucursal: pedido.sucursal,
-        condicion_pago: pedido.condicionPago,
-        total_cajas: pedido.totalCajas, total_unidades: pedido.totalUnidades,
-        items: pedido.items
-      })
-    }).catch(function () { /* la copia en Supabase es best-effort */ });
+      body: JSON.stringify(payload)
+    }).catch(function (e) { console.warn('Entregas sheet error:', e); });
   }
 
   /* ============================================================
@@ -1182,11 +1363,8 @@
     html += '</div>';
 
     html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>Integración Loekemeyer (envío del pedido)</h2></div><div class="card__body">' +
-      '<form class="form" id="lkForm">' +
-      field('URL del Apps Script (Web App …/exec)', '<input class="input" id="cAppsScript" value="' + esc(m.appsScriptUrl || '') + '" placeholder="https://script.google.com/macros/s/AKfy…/exec">') +
-      '<div class="hint">El botón <strong>«Enviar a Loekemeyer»</strong> (en Stocks) manda el pedido sugerido a la planilla «Pedidos LK» —el N° de pedido se asigna solo— y guarda una copia en Supabase. La <strong>sucursal de entrega</strong> se elige arriba, en la pantalla de Stocks. La URL del Apps Script ya viene <strong>precargada</strong>; solo cambiala acá si redeployás con otra.</div>' +
-      '<div class="form-actions"><button type="submit" class="btn btn--primary">Guardar integración</button></div>' +
-      '</form></div></div>';
+      '<div class="hint">El botón <strong>«Enviar a Loekemeyer»</strong> (en Stocks) crea un <strong>pedido normal</strong> en el sistema de Loekemeyer (igual que el catálogo mayorista): queda en tus pedidos y se envía a las planillas de Pedidos y de Entregas. La forma de pago es <strong>Contado (-25%)</strong> y la <strong>sucursal de entrega</strong> se elige arriba, en la pantalla de Stocks. Para enviar tenés que estar logueado en la página principal como OSA.</div>' +
+      '</div></div>';
 
     html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>¿Cómo funciona?</h2></div><div class="card__body">' +
       '<ol style="margin:0;padding-left:20px;line-height:1.9;color:var(--muted);">' +
@@ -1205,12 +1383,6 @@
       var meses = Math.max(1, Math.round(parseFloat($('#cPeriodo').value) || 17));
       S.setMeta({ empresa: $('#cEmpresa').value, cliente: $('#cCliente').value, moneda: $('#cMoneda').value, periodoMeses: meses });
       toast('Configuración guardada', 'ok'); updateBrand(); render();
-    });
-    var lkForm = $('#lkForm');
-    if (lkForm) lkForm.addEventListener('submit', function (e) {
-      e.preventDefault();
-      S.setMeta({ appsScriptUrl: ($('#cAppsScript').value || '').trim() });
-      toast('Integración Loekemeyer guardada', 'ok');
     });
     bindAction('export', exportar);
     bindAction('import', function () { $('#importFile').click(); });

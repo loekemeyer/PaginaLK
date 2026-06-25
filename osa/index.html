@@ -107,6 +107,9 @@
   <!-- Toasts -->
   <div class="toasts" id="toasts" aria-live="polite"></div>
 
+  <!-- Supabase JS: reusa la sesión del sitio (misma origin) para mandar el pedido
+       como uno normal (submit_order_fast + sheets) y guardar ventas/entregas. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/store.js"></script>
   <script src="js/app.js"></script>
 </body>
