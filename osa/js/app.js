@@ -86,7 +86,39 @@
     return p[2] + '/' + p[1] + '/' + p[0];
   }
   // La foto se escapa: puede venir de un respaldo importado y se interpola en src="...".
-  function fotoDe(a) { return esc(a.foto || S.placeholder(a.nombre)); }
+  // Imágenes reales de PaginaLK: storage público de Supabase por código (las mismas
+  // fotos que el catálogo mayorista). Si no existe la del código, el <img> cae al
+  // placeholder vía onerror (ver imgTag). Las fotos están pre-renderizadas 400x400 webp.
+  var BASE_IMG = SUPABASE_URL + '/storage/v1/object/public/products-images/';
+  var IMG_PARAMS = ''; // sin transform (igual que PaginaLK)
+  function imgURL(cod) {
+    return BASE_IMG + encodeURIComponent(String(cod || '').trim()) + '.webp' + IMG_PARAMS;
+  }
+  // URL a mostrar: una foto propia subida en la app (data-uri que NO es el placeholder
+  // SVG del seed) tiene prioridad; si no, la foto real por código.
+  function fotoDe(a) {
+    var f = (a && a.foto) || '';
+    if (f && f.indexOf('data:image/svg+xml') !== 0) return esc(f);
+    if (a && a.codigo) return esc(imgURL(a.codigo));
+    return esc(S.placeholder(a ? a.nombre : ''));
+  }
+  // <img> con cadena de fallback: código.webp → código alterno (toggle "E") → placeholder.
+  function imgTag(a, attrs) {
+    var ph = S.placeholder(a ? a.nombre : '');
+    var f = (a && a.foto) || '';
+    var extra = attrs ? ' ' + attrs : '';
+    if (f && f.indexOf('data:image/svg+xml') !== 0) {
+      return '<img src="' + esc(f) + '" alt="" loading="lazy" data-ph="' + esc(ph) +
+        '" onerror="this.onerror=null;this.src=this.dataset.ph;"' + extra + '>';
+    }
+    var cod = String((a && a.codigo) || '').trim();
+    if (!cod) return '<img src="' + esc(ph) + '" alt=""' + extra + '>';
+    var altCod = /E$/i.test(cod) ? cod.replace(/E$/i, '') : cod + 'E';
+    return '<img src="' + esc(imgURL(cod)) + '" alt="" loading="lazy" ' +
+      'data-alt="' + esc(imgURL(altCod)) + '" data-ph="' + esc(ph) + '" ' +
+      'onerror="if(this.dataset.alt){this.src=this.dataset.alt;this.removeAttribute(\'data-alt\');}else{this.onerror=null;this.src=this.dataset.ph;}"' +
+      extra + '>';
+  }
 
   /* ---------- Toast ---------- */
   var ICON = {
@@ -281,7 +313,7 @@
       var clase = sg > 0 ? 'reponer' : 'ok';
       html += '<tr data-art="' + a.id + '" data-clase="' + clase + '" ' +
         'data-search="' + esc((a.nombre + ' ' + (a.codigo || '')).toLowerCase()) + '" style="cursor:pointer;">' +
-        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
+        '<td><div class="cell-art">' + imgTag(a) + '<div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
         '<td class="num"><strong>' + qf(s, a) + '</strong></td>' +
         '<td class="num muted">' + (a.stockMaximo != null ? qf(pp, a) : '—') + '</td>' +
         '<td class="num">' + (sg > 0 ? '<span class="badge badge--warn">+' + qf(sg, a) + '</span>' : '—') + '</td>' +
@@ -349,7 +381,7 @@
       var t = S.totales(a.id);
       var abierto = !!ui.expanded[a.id];
       html += '<tr data-artrow="' + a.id + '">' +
-        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
+        '<td><div class="cell-art">' + imgTag(a) + '<div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
         '<td class="num muted">' + qf(a.stockInicial, a) + '</td>' +
         '<td class="num" style="color:var(--ok);">+' + qf(t.entregas, a) + '</td>' +
         '<td class="num" style="color:var(--primary);">−' + qf(t.ventas, a) + '</td>' +
@@ -450,7 +482,7 @@
       var sg = S.sugerido(a, stock);
       var maxView = (a.stockMaximo != null) ? qN(a.stockMaximo, a) : '';
       html += '<tr data-rowp="' + a.id + '" data-search="' + esc((a.nombre + ' ' + (a.codigo || '')).toLowerCase()) + '">' +
-        '<td><div class="cell-art"><img src="' + fotoDe(a) + '" alt=""><div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
+        '<td><div class="cell-art">' + imgTag(a) + '<div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
         '<td class="num"><strong>' + qf(Math.max(0, stock), a) + '</strong></td>' +
         '<td class="num muted">' + qf(S.promedioMensual(a), a) + '</td>' +
         '<td class="num"><input class="qty-input" type="number" min="0" step="1" value="' + maxView + '" placeholder="—" data-max="' + a.id + '"></td>' +
@@ -861,7 +893,7 @@
       (a ? resumen : '') +
       '<form class="form" id="artForm">' +
       '<div class="imgdrop" id="imgdrop">' +
-      '<img class="imgdrop__preview" id="imgPreview" src="' + esc(foto || S.placeholder(a ? a.nombre : 'Nuevo')) + '" alt="">' +
+      '<img class="imgdrop__preview" id="imgPreview" src="' + (a ? fotoDe(a) : esc(S.placeholder('Nuevo'))) + '" alt="" data-ph="' + esc(S.placeholder(a ? a.nombre : 'Nuevo')) + '" onerror="this.onerror=null;this.src=this.dataset.ph;">' +
       '<div class="imgdrop__text"><strong>Foto del artículo</strong><span>Tocá para subir una imagen (JPG/PNG). Se optimiza sola.</span></div>' +
       '<input type="file" id="imgInput" accept="image/*" hidden>' +
       '</div>' +
