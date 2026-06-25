@@ -127,6 +127,14 @@ function isListPriceOnlyClient() {
   return isAdmin || String(customerProfile?.cod_cliente) === "5000";
 }
 
+// Cliente especial OSA (Osa Distribuidora SRL): puede elegir entre el formato
+// regular de la página y el "Formato OSA" (gestión de stock en consignación,
+// en /osa/). Su código en el sistema de Loekemeyer es 2533.
+const OSA_COD_CLIENTE = "2533";
+function isOsaClient() {
+  return String(customerProfile?.cod_cliente || "").trim() === OSA_COD_CLIENTE;
+}
+
 const cart = []; // [{ productId: uuidString, qtyCajas }]
 
 // Entrega desde DB (slots 1..25)
@@ -473,6 +481,51 @@ function closeLogin() {
   $("loginModal")?.setAttribute("aria-hidden", "true");
 }
 
+/***********************
+ * SELECTOR DE FORMATO (cliente OSA · 2533)
+ ***********************/
+const OSA_FORMAT_PREF_KEY = "osa_format_pref"; // 'regular' | 'osa'
+
+function openOsaFormatChooser() {
+  const m = $("osaFormatModal");
+  if (!m) return;
+  m.classList.add("open");
+  m.setAttribute("aria-hidden", "false");
+}
+
+function closeOsaFormatChooser() {
+  const m = $("osaFormatModal");
+  if (!m) return;
+  m.classList.remove("open");
+  m.setAttribute("aria-hidden", "true");
+}
+
+// Guarda la última preferencia de formato (sin redirigir). "Formato OSA" navega
+// solo (es un <a href="osa/index.html">); el formato regular cierra el modal.
+function recordarFormato(which) {
+  try {
+    localStorage.setItem(OSA_FORMAT_PREF_KEY, which === "osa" ? "osa" : "regular");
+  } catch (e) {}
+}
+
+function elegirFormato(which) {
+  recordarFormato(which);
+  if (which === "osa") {
+    window.location.href = "osa/index.html";
+    return;
+  }
+  closeOsaFormatChooser();
+}
+
+// Muestra el selector de formato cuando ingresa OSA (login genuino). Solo una
+// vez por sesión de pestaña, para no reabrirlo en cada refresco de auth.
+function maybeShowOsaFormatChooser() {
+  if (!isOsaClient()) return;
+  if (window.__osaChooserShown) return;
+  window.__osaChooserShown = true;
+  openOsaFormatChooser();
+}
+
 function looksLikeCUIT(val) {
   const cleaned = val.replace(/[-\s]/g, "");
   if (/[^0-9]/.test(cleaned)) return false;
@@ -706,6 +759,10 @@ async function refreshAuthState(sessionOverride) {
   var isLoekemeyerAdmin = isAdmin && codAdminGate === "1";
   if ($("menuAdminPanel"))
     $("menuAdminPanel").style.display = isLoekemeyerAdmin ? "block" : "none";
+
+  // Acceso al "Formato OSA": solo el cliente OSA (cod_cliente 2533).
+  if ($("menuFormatoOsa"))
+    $("menuFormatoOsa").style.display = isOsaClient() ? "block" : "none";
 
   // Admin: ocultar "Análisis de tus compras" (es de cliente)
   if ($("menuAnalisis"))
@@ -9746,6 +9803,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   window.closeLogin = closeLogin;
   window.login = login;
   window.logout = logout;
+  window.elegirFormato = elegirFormato;
+  window.recordarFormato = recordarFormato;
+  window.openOsaFormatChooser = openOsaFormatChooser;
+  window.closeOsaFormatChooser = closeOsaFormatChooser;
 
   window.addFirstBox = addFirstBox;
   window.changeQty = changeQty;
@@ -10506,6 +10567,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       await loadLokeProducts();
       renderLokeProducts();
     }
+
+    // Cliente OSA: ofrecer elegir entre formato regular y "Formato OSA".
+    if (_event === "SIGNED_IN") maybeShowOsaFormatChooser();
   });
 
   // Al volver a la pestaña solo refrescar UI, no tocar auth (Supabase lo hace solo)

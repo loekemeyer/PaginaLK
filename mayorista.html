@@ -206,6 +206,15 @@
               >
                 <span class="user-menu-label">Panel Admin</span>
               </a>
+              <a
+                class="user-menu-item"
+                id="menuFormatoOsa"
+                href="osa/index.html"
+                style="display: none"
+              >
+                <span class="user-menu-label">Formato OSA</span>
+                <span class="user-menu-new-badge" aria-label="Nuevo">OSA</span>
+              </a>
               <div
                 class="user-menu-sep"
                 role="separator"
@@ -1513,6 +1522,98 @@
         </div>
       </div>
     </div>
+
+    <!-- MODAL ELEGIR FORMATO (solo cliente OSA · 2533) -->
+    <div class="modal" id="osaFormatModal" aria-hidden="true">
+      <div class="modal-content" style="max-width: 560px">
+        <div class="modal-header">
+          <h3>¿Cómo querés ver la página?</h3>
+        </div>
+        <div class="modal-body">
+          <p
+            class="modal-hint"
+            style="margin: 0 0 16px 0; font-size: 14px; color: #555"
+          >
+            Detectamos que ingresaste como <strong>OSA</strong>. Elegí con qué
+            formato querés trabajar. Vas a poder cambiar cuando quieras desde el
+            menú de usuario.
+          </p>
+          <div class="osa-format-choices">
+            <button
+              type="button"
+              class="osa-format-card"
+              onclick="elegirFormato('regular')"
+            >
+              <span class="osa-format-card__title">Formato regular</span>
+              <span class="osa-format-card__desc">
+                El catálogo mayorista de siempre: productos, carrito y envío de
+                pedidos.
+              </span>
+            </button>
+            <a
+              class="osa-format-card osa-format-card--accent"
+              href="osa/index.html"
+              onclick="recordarFormato('osa')"
+            >
+              <span class="osa-format-card__title">Formato OSA</span>
+              <span class="osa-format-card__desc">
+                Gestión de stock en consignación: stocks, movimientos, punto de
+                pedido, entregas y ventas.
+              </span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <style>
+      #osaFormatModal .osa-format-choices {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+      @media (max-width: 520px) {
+        #osaFormatModal .osa-format-choices {
+          grid-template-columns: 1fr;
+        }
+      }
+      #osaFormatModal .osa-format-card {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        text-align: left;
+        padding: 18px 16px;
+        border: 1.5px solid #e2e4ec;
+        border-radius: 12px;
+        background: #fff;
+        cursor: pointer;
+        text-decoration: none;
+        color: inherit;
+        font-family: inherit;
+        transition: border-color 0.15s, box-shadow 0.15s, transform 0.05s;
+      }
+      #osaFormatModal .osa-format-card:hover {
+        border-color: #b91c1c;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+      }
+      #osaFormatModal .osa-format-card:active {
+        transform: translateY(1px);
+      }
+      #osaFormatModal .osa-format-card--accent {
+        border-color: #b91c1c;
+        background: #fff7f7;
+      }
+      #osaFormatModal .osa-format-card__title {
+        font-size: 16px;
+        font-weight: 700;
+        color: #1c2233;
+      }
+      #osaFormatModal .osa-format-card__desc {
+        font-size: 13px;
+        line-height: 1.45;
+        color: #666;
+      }
+    </style>
 
     <!-- MODAL LOGIN -->
     <div class="modal" id="loginModal" aria-hidden="true">

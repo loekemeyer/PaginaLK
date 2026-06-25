@@ -70,6 +70,8 @@ Allow: /
 Disallow: /logs/
 Disallow: /backup/
 Disallow: /tmp/
+# Herramienta privada del cliente OSA (no es contenido público)
+Disallow: /osa/
 
 # ============================================
 # SITEMAP
