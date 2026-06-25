@@ -6,7 +6,7 @@
   'use strict';
 
   var S = window.Store;
-  var APP_VERSION = '1.5.0';
+  var APP_VERSION = window.APP_VERSION || '2.0.7'; // unificada con el sitio (version.js)
   // ----- Integración Loekemeyer -----
   // El pedido de OSA se envía como un pedido normal del sitio (submit_order_fast
   // + sheets-proxy + sheets-entregas-proxy) reusando la sesión del cliente OSA
