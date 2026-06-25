@@ -14,11 +14,11 @@
   var SUPABASE_URL = 'https://kwkclwhmoygunqmlegrg.supabase.co';
   // anon key (mismo que el sitio): permite reusar la sesión guardada y respeta RLS.
   var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3a2Nsd2htb3lndW5xbWxlZ3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1MjA2NzUsImV4cCI6MjA4NTA5NjY3NX0.soqPY5hfA3RkAJ9jmIms8UtEGUc4WpZztpEbmDijOgU';
-  // Cliente supabase-js: misma URL/anon key/storage que el sitio → toma la sesión
-  // del cliente logueado sin re-login.
-  var sb = (window.supabase && window.supabase.createClient)
-    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    : null;
+  // Cliente supabase-js compartido con store.js (un solo cliente / una sola sesión).
+  var sb = window.__osaSb ||
+    ((window.supabase && window.supabase.createClient)
+      ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+      : null);
   var SHEETS_PROXY_URL = 'https://kwkclwhmoygunqmlegrg.functions.supabase.co/sheets-proxy';
   var SHEETS_ENTREGAS_PROXY_URL = 'https://kwkclwhmoygunqmlegrg.functions.supabase.co/sheets-entregas-proxy';
   var LK_CLIENTE = 2533;   // código de OSA en el sistema de Loekemeyer
@@ -766,23 +766,8 @@
       var batch = detalle.filter(function (d) { return d.art && d.f.ventas > 0; })
         .map(function (d) { return { articuloId: d.art.id, tipo: 'venta', cantidad: d.f.ventas, fecha: fech, nota: nota, quincena: qk }; });
       if (!batch.length) { toast('No hay ventas para importar', 'warn'); return; }
+      // addMovimientosBatch persiste cada venta en Supabase (osa_ventas).
       S.addMovimientosBatch(batch);
-      // Guardar las ventas en Supabase (osa_ventas), además del localStorage.
-      var ventasOk = detalle.filter(function (d) { return d.art && d.f.ventas > 0; });
-      osaPersistLineas('osa_ventas',
-        ventasOk.map(function (d) { return d.art.codigo; }),
-        function (map) {
-          return ventasOk.map(function (d) {
-            var p = map[String(d.art.codigo || '').trim().toUpperCase()];
-            return {
-              cod_cliente: LK_CLIENTE, codigo: d.art.codigo, product_id: p ? p.id : null,
-              nombre: d.art.nombre, unidades: d.f.ventas, cajas: d.cajas,
-              fecha: fech, quincena: qk,
-              periodo_desde: r.periodo.desde || null, periodo_hasta: r.periodo.hasta || null,
-              source: 'osa-app'
-            };
-          });
-        });
       closeModal();
       toast('Importadas ' + batch.length + ' ventas (' + fmtInt(r.totalParseado) + ' u / ' + fmtInt(totalCajas) + ' cajas)', 'ok');
       var pend = S.pedidoSugerido().length;
@@ -866,42 +851,14 @@
     $('#entConfirm').addEventListener('click', function () {
       if (enCajas && r.uxcDerivado) S.actualizarUxcDesde(r.uxcDerivado); // mantener Uni×Caja al día
       var batch = r.filas.filter(function (f) { return f.articuloId && f.unidades > 0; })
-        .map(function (f) { return { articuloId: f.articuloId, tipo: 'entrega', cantidad: f.unidades, fecha: f.fecha || S.hoyISO(), nota: nota }; });
+        .map(function (f) { return { articuloId: f.articuloId, tipo: 'entrega', cantidad: f.unidades, fecha: f.fecha || S.hoyISO(), nota: nota, formato: r.formato }; });
       if (!batch.length) { toast('No hay entregas para registrar', 'warn'); return; }
+      // addMovimientosBatch persiste cada entrega en Supabase (osa_entregas).
       S.addMovimientosBatch(batch);
-      // Guardar las entregas en Supabase (osa_entregas), además del localStorage.
-      var entOk = r.filas.filter(function (f) { return f.articuloId && f.unidades > 0; });
-      osaPersistLineas('osa_entregas',
-        entOk.map(function (f) { var a = S.getArticulo(f.articuloId); return (a && a.codigo) || f.codigo; }),
-        function (map) {
-          return entOk.map(function (f) {
-            var a = S.getArticulo(f.articuloId);
-            var cod = (a && a.codigo) || f.codigo;
-            var p = map[String(cod || '').trim().toUpperCase()];
-            return {
-              cod_cliente: LK_CLIENTE, codigo: cod, product_id: p ? p.id : null,
-              nombre: (a && a.nombre) || f.nombre, unidades: f.unidades, cajas: f.cajas,
-              uxc: f.uxc, fecha: f.fecha || S.hoyISO(), formato: r.formato, source: 'osa-app'
-            };
-          });
-        });
       closeModal();
       toast('Registradas ' + batch.length + ' entregas (' + fmtInt(r.totalUnidades) + ' u / ' + fmtInt(r.totalCajas) + ' cajas)', 'ok');
       render();
     });
-  }
-
-  // Persiste líneas en una tabla Supabase (osa_ventas / osa_entregas). Best-effort:
-  // requiere sesión OSA (RLS); si no hay, el dato igual queda en localStorage.
-  function osaPersistLineas(tabla, codigos, buildRows) {
-    if (!sb) return;
-    osaResolveProducts(codigos).then(function (map) {
-      var rows = (buildRows(map) || []).filter(Boolean);
-      if (!rows.length) return;
-      sb.from(tabla).insert(rows).then(function (res) {
-        if (res.error) console.warn(tabla + ' insert error:', res.error.message);
-      });
-    }).catch(function (e) { console.warn(tabla + ' persist error:', e); });
   }
 
   function openAjuste() {
@@ -1045,12 +1002,11 @@
     setTimeout(function () { w.focus(); w.print(); }, 350);
   }
 
-  /* ---------- Enviar pedido a Loekemeyer (Google Sheet + Supabase) ----------
+  /* ---------- Enviar pedido a Loekemeyer (pedido normal del sitio) ----------
      Flujo: el botón abre un POP-UP donde el usuario revisa/ajusta las cajas de
-     cada artículo (+/−); al confirmar se manda. El pedido va SIEMPRE en cajas
-     cerradas (las unidades = cajas × Uni×Caja). Destinos:
-       1) Apps Script del Sheet "Pedidos LK" (N° Pedido del contador compartido)
-       2) tabla aislada osa_reposicion en Supabase (copia/histórico). */
+     cada artículo (+/−); al confirmar se crea un pedido normal vía
+     submit_order_fast (orders/order_items) + sheets-proxy + sheets-entregas-proxy
+     (igual que el catálogo mayorista). El pedido va SIEMPRE en cajas cerradas. */
 
   // Items sugeridos (en cajas cerradas) listos para revisar/editar.
   function itemsSugeridosLK() {
@@ -1071,10 +1027,10 @@
     var lim = items.filter(function (it) { return it.cajas > 0; }).map(function (it) {
       return { cod: it.cod, nombre: it.nombre, cajas: it.cajas, unidades: it.cajas * it.uxc };
     });
-    var iso = S.hoyISO().split('-'); // yyyy-mm-dd -> dd/MM/yyyy (formato del Sheet)
+    var iso = S.hoyISO().split('-'); // yyyy-mm-dd -> dd/MM/yyyy
     return {
       fecha: iso[2] + '/' + iso[1] + '/' + iso[0],
-      cliente: LK_CLIENTE, vend: LK_VEND, condicionPago: LK_COND_PAGO,
+      cliente: LK_CLIENTE, vend: LK_VEND,
       sucursal: m.sucursalLK || LK_SUCURSALES[0].val,
       items: lim,
       totalCajas: lim.reduce(function (s, it) { return s + it.cajas; }, 0),
@@ -1388,8 +1344,9 @@
     bindAction('import', function () { $('#importFile').click(); });
     $('#importFile').addEventListener('change', importar);
     bindAction('reset', function () {
-      confirmar('Borrar todo', 'Se eliminarán TODOS los artículos, movimientos y pedidos de este navegador. ¿Seguro?', function () {
-        S.resetAll(); toast('Datos borrados', 'ok'); location.hash = '#/stocks'; setView('stocks');
+      confirmar('Borrar todo', 'Se eliminarán TODOS los artículos y movimientos de OSA en Supabase y se vuelve a sembrar el catálogo. ¿Seguro?', async function () {
+        toast('Borrando…', 'info');
+        await S.resetAll(); toast('Datos reiniciados', 'ok'); location.hash = '#/stocks'; setView('stocks');
       });
     });
   };
@@ -1405,15 +1362,16 @@
   function importar(e) {
     var file = e.target.files[0]; if (!file) return;
     var reader = new FileReader();
-    reader.onload = function () {
-      try { S.importData(reader.result); toast('Respaldo importado', 'ok'); render(); }
-      catch (err) { toast('El archivo no es válido', 'danger'); }
+    reader.onload = async function () {
+      try { toast('Importando…', 'info'); await S.importData(reader.result); toast('Respaldo importado', 'ok'); updateBrand(); render(); }
+      catch (err) { toast('El archivo no es válido o no se pudo importar', 'danger'); }
     };
     reader.readAsText(file);
   }
   function cargarDemo() {
-    confirmar('Cargar ejemplo', 'Esto reemplaza los datos actuales con el catálogo de ejemplo (Loekemeyer · OSA). ¿Continuar?', function () {
-      S.loadDemo(); toast('Catálogo de ejemplo cargado', 'ok'); updateBrand(); location.hash = '#/stocks'; setView('stocks');
+    confirmar('Cargar ejemplo', 'Vuelve a sembrar el catálogo de ejemplo (Loekemeyer · OSA) en Supabase. No borra los movimientos. ¿Continuar?', async function () {
+      toast('Cargando…', 'info');
+      await S.loadDemo(); toast('Catálogo de ejemplo cargado', 'ok'); updateBrand(); location.hash = '#/stocks'; setView('stocks');
     });
   }
 
@@ -1477,19 +1435,47 @@
   });
 
   /* ---------- Init ---------- */
-  function init() {
+  // Pantalla de carga / login mientras se resuelve la sesión y se trae todo.
+  function pantalla(titulo, msg, btnHtml) {
+    $('#viewTitle').textContent = titulo;
+    $('#viewSubtitle').textContent = '';
+    viewEl.innerHTML =
+      '<div class="card"><div class="card__body"><div class="empty">' +
+      '<div class="empty__ic">' + iconBox() + '</div>' +
+      '<h3>' + esc(titulo) + '</h3><p>' + esc(msg) + '</p>' +
+      (btnHtml ? '<div class="row" style="justify-content:center;">' + btnHtml + '</div>' : '') +
+      '</div></div></div>';
+  }
+
+  async function init() {
     var vEl = $('#appVersion');
     if (vEl) vEl.textContent = 'v' + APP_VERSION;
     window.addEventListener('resize', medirTopbar);
-    // Aviso si falla un guardado (p. ej. localStorage lleno). Con throttle para
-    // no apilar toasts si fallan varios guardados seguidos.
+    // Aviso si falla una escritura a Supabase (con throttle).
     var ultErr = 0;
     S.setSaveErrorHandler(function () {
       var ahora = Date.now();
       if (ahora - ultErr < 3000) return;
       ultErr = ahora;
-      toast('No se pudo guardar: el almacenamiento del navegador está lleno. Descargá un respaldo y quitá fotos pesadas.', 'danger');
+      toast('No se pudo guardar en Supabase. Revisá tu conexión / sesión.', 'danger');
     });
+
+    pantalla('Cargando…', 'Trayendo tus datos desde Supabase.', '');
+    try {
+      await S.init(); // hidrata el estado desde Supabase (requiere sesión OSA)
+    } catch (e) {
+      if (e && e.message === 'no-session') {
+        pantalla('Iniciá sesión',
+          'El Formato OSA trabaja con tu cuenta de Loekemeyer. Ingresá en la página principal y volvé a entrar.',
+          '<a class="btn btn--primary" href="../mayorista.html">Ir a iniciar sesión</a>');
+      } else {
+        pantalla('No se pudo cargar',
+          'Hubo un problema trayendo los datos: ' + ((e && e.message) || e) + '. Reintentá recargando.',
+          '<button class="btn btn--primary" onclick="location.reload()">Reintentar</button>');
+      }
+      return;
+    }
+    updateBrand();
     var v = (location.hash || '').replace('#/', '');
     setView(v || 'stocks');
   }

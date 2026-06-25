@@ -1,85 +1,52 @@
 /* ============================================================
    StockRotativo · Capa de datos y lógica de negocio
-   Persistencia local (localStorage) con respaldo exportable.
+   Fuente de verdad: Supabase (sin localStorage). El estado se hidrata desde
+   las tablas osa_* al iniciar (Store.init) y cada cambio se escribe directo.
+   El stock se calcula (inicial + entregas − ventas ± ajustes).
    ============================================================ */
 (function () {
   'use strict';
 
-  var KEY = 'stockrotativo.v1';
-  // Versión del catálogo/seed precargado. Al subirla, el catálogo nuevo se
-  // fusiona (merge) en los navegadores existentes: actualiza nombres, totales y
-  // máximos y agrega artículos nuevos, SIN borrar movimientos, pedidos ni el
-  // stock real ya cargado (ver mergeSeed).
-  var SEED_VERSION = 12;
-  // Versión del "stock inicial" precargado (columna Existencia). Al subirla, el
-  // stock inicial real se reaplica una vez aunque ya haya movimientos (corrección
-  // de baseline). Después vuelve a protegerse. Ver mergeSeed.
-  var STOCK_BASELINE = 1;
-  // Versión de la Uni×Caja autoritativa (sheet "Cotizador Loekemeyer"). Al subirla,
-  // la Uni×Caja del seed se reaplica una vez a todos los artículos (corrige valores
-  // viejos), y después se respeta la que cargue un import. Ver mergeSeed.
-  var UXC_BASELINE = 1;
-  // Artículos duplicados (mismo producto con código base y +E) que deben quedar
-  // como uno solo: [idDuplicado, idCanónico]. Al fusionar se mueven los
-  // movimientos y se suma el stock inicial al canónico. Ver mergeSeed.
-  var FUSIONAR = [['a_580', 'a_580E'], ['a_525', 'a_525E']];
-  // Artículos discontinuados: se quitan del catálogo y de los datos del usuario.
-  var DISCONTINUADOS = ['388E'];
-  // Handler opcional que registra la capa de UI para avisar si falla un guardado
-  // (p. ej. localStorage lleno). Ver setSaveErrorHandler.
+  var SUPABASE_URL = 'https://kwkclwhmoygunqmlegrg.supabase.co';
+  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3a2Nsd2htb3lndW5xbWxlZ3JnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1MjA2NzUsImV4cCI6MjA4NTA5NjY3NX0.soqPY5hfA3RkAJ9jmIms8UtEGUc4WpZztpEbmDijOgU';
+  var COD_CLIENTE = 2533;
+  // Cliente supabase-js: misma URL/anon key/storage que el sitio → reusa la sesión
+  // del cliente OSA logueado en la página principal (misma origin).
+  var sb = (window.supabase && window.supabase.createClient)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
+  window.__osaSb = sb; // compartido con app.js (un solo cliente / una sola sesión)
+  // Handler opcional de la UI para avisar si falla una escritura a Supabase.
   var onSaveError = null;
+  function fail(e) {
+    console.error('OSA · Supabase:', (e && e.message) || e);
+    if (typeof onSaveError === 'function') { try { onSaveError(e); } catch (_) {} }
+  }
+  // Escritura best-effort: si la promesa resuelve con error, lo reporta a la UI.
+  function fire(promise) {
+    if (promise && typeof promise.then === 'function') {
+      promise.then(function (r) { if (r && r.error) fail(r.error); }, fail);
+    }
+    return promise;
+  }
 
-  /* ---------- Estado base ---------- */
+  /* ---------- Estado base (en memoria; espejo de Supabase) ---------- */
   function blank() {
     return {
       meta: {
-        empresa: 'Mi Empresa',
-        cliente: '',
+        empresa: 'Loekemeyer',
+        cliente: 'Osa Distribuidora SRL',
         moneda: 'ARS',
         periodoMeses: 17,       // meses que abarca el total de ventas conocidas (base del promedio mensual)
-        mesesPedidoDefault: 2,  // meses de cobertura deseados por defecto (punto de pedido = promedio x meses)
+        mesesPedidoDefault: 2,  // meses de cobertura deseados por defecto
         unidadVista: 'cajas',   // unidad para MOSTRAR cantidades: 'cajas' | 'unidades' (solo display)
-        appsScriptUrl: '',      // URL .../exec del Apps Script que escribe en el Sheet "Pedidos LK"
-        sucursalLK: 'Zuviria 5352- Villa Lugano', // sucursal de entrega default del pedido a Loekemeyer
-        creado: Date.now()
+        sucursalLK: 'Zuviria 5352- Villa Lugano' // sucursal de entrega default del pedido
       },
-      // Artículo: promedioManual y mesesPedido son overrides opcionales (null = usar el automático/global).
-      // stockMaximo (unidades) = nivel objetivo; pedido sugerido = stockMaximo − stock. null = sin máximo (no repone).
-      articulos: [], // {id,codigo,nombre,descripcion,foto,precio,stockInicial,totalHistorico,uxc,stockMaximo,promedioManual,mesesPedido,activo}
-      movimientos: [], // {id,articuloId,tipo,cantidad,fecha,nota}
-      pedidos: [] // {id,fecha,estado,nota,items:[{articuloId,codigo,nombre,cantidad}]}
+      articulos: [],  // {id,codigo,nombre,descripcion,foto,precio,stockInicial,totalHistorico,uxc,stockMaximo,promedioManual,mesesPedido,activo}
+      movimientos: [] // {id,dbId,tipo,articuloId,cantidad,fecha,nota,quincena}
     };
   }
-
-  function load() {
-    try {
-      var raw = localStorage.getItem(KEY);
-      if (!raw) return seedReal(); // primera vez: catálogo real precargado
-      var p = JSON.parse(raw);
-      var base = blank();
-      base.meta = Object.assign(base.meta, p.meta || {});
-      base.articulos = Array.isArray(p.articulos) ? p.articulos : [];
-      base.movimientos = Array.isArray(p.movimientos) ? p.movimientos : [];
-      base.pedidos = Array.isArray(p.pedidos) ? p.pedidos : [];
-      return base;
-    } catch (e) {
-      console.error('No se pudo leer el almacenamiento:', e);
-      return blank();
-    }
-  }
-
-  function save() {
-    try {
-      localStorage.setItem(KEY, JSON.stringify(state));
-      return true;
-    } catch (e) {
-      console.error('No se pudo guardar:', e);
-      if (typeof onSaveError === 'function') {
-        try { onSaveError(e); } catch (_) {}
-      }
-      return false;
-    }
-  }
+  var state = blank();
 
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -98,9 +65,75 @@
     return Math.max(0, n);
   }
 
+  /* ---------- Mapeos fila Supabase <-> objeto en memoria ---------- */
+  function rowToArt(r) {
+    return {
+      id: r.id, codigo: r.codigo || '', nombre: r.nombre || 'Sin nombre',
+      descripcion: r.descripcion || '', foto: r.foto || '', precio: num(r.precio, 0),
+      stockInicial: Math.max(0, Math.round(num(r.stock_inicial, 0))),
+      totalHistorico: Math.max(0, Math.round(num(r.total_historico, 0))),
+      uxc: Math.max(1, Math.round(num(r.uxc, 1))),
+      stockMaximo: r.stock_maximo == null ? null : Math.round(num(r.stock_maximo, 0)),
+      promedioManual: r.promedio_manual == null ? null : num(r.promedio_manual, 0),
+      mesesPedido: r.meses_pedido == null ? null : num(r.meses_pedido, 0),
+      activo: r.activo !== false
+    };
+  }
+  function artToRow(a) {
+    return {
+      id: a.id, cod_cliente: COD_CLIENTE, codigo: a.codigo || '', nombre: a.nombre || 'Sin nombre',
+      descripcion: a.descripcion || '', precio: num(a.precio, 0),
+      stock_inicial: Math.max(0, Math.round(num(a.stockInicial, 0))),
+      total_historico: Math.max(0, Math.round(num(a.totalHistorico, 0))),
+      uxc: Math.max(1, Math.round(num(a.uxc, 1))),
+      stock_maximo: a.stockMaximo == null ? null : Math.round(a.stockMaximo),
+      promedio_manual: a.promedioManual == null ? null : a.promedioManual,
+      meses_pedido: a.mesesPedido == null ? null : a.mesesPedido,
+      activo: a.activo !== false, foto: a.foto || null,
+      updated_at: new Date().toISOString()
+    };
+  }
+  function tablaDe(tipo) { return tipo === 'venta' ? 'osa_ventas' : (tipo === 'entrega' ? 'osa_entregas' : 'osa_ajustes'); }
+  function movKey(tipo, dbId) { return (tipo === 'venta' ? 'V' : tipo === 'entrega' ? 'E' : 'A') + dbId; }
+  function ventaRowToMov(r) { return { id: movKey('venta', r.id), dbId: r.id, tipo: 'venta', articuloId: r.articulo_id, cantidad: Math.round(num(r.unidades, 0)), fecha: r.fecha, nota: r.nota || '', quincena: r.quincena || null }; }
+  function entregaRowToMov(r) { return { id: movKey('entrega', r.id), dbId: r.id, tipo: 'entrega', articuloId: r.articulo_id, cantidad: Math.round(num(r.unidades, 0)), fecha: r.fecha, nota: r.nota || '' }; }
+  function ajusteRowToMov(r) { return { id: movKey('ajuste', r.id), dbId: r.id, tipo: 'ajuste', articuloId: r.articulo_id, cantidad: Math.round(num(r.cantidad, 0)), fecha: r.fecha, nota: r.nota || '' }; }
+  // Fila a insertar para un movimiento en memoria.
+  function movToRow(mov) {
+    var a = getArticulo(mov.articuloId);
+    var base = {
+      cod_cliente: COD_CLIENTE, articulo_id: mov.articuloId,
+      codigo: (a && a.codigo) || null, nombre: (a && a.nombre) || null,
+      fecha: mov.fecha || hoyISO(), nota: (mov.nota || '').trim()
+    };
+    if (mov.tipo === 'ajuste') {
+      base.cantidad = Math.round(num(mov.cantidad, 0));
+    } else {
+      var u = Math.round(num(mov.cantidad, 0));
+      base.unidades = u;
+      base.cajas = a ? Math.round(u / uxcDe(a)) : u;
+      base.source = 'osa-app';
+      if (mov.tipo === 'venta') base.quincena = mov.quincena || null;
+      else base.formato = mov._formato || null;
+    }
+    return base;
+  }
+
   /* ---------- Meta ---------- */
   function getMeta() { return Object.assign({}, state.meta); }
-  function setMeta(patch) { state.meta = Object.assign(state.meta, patch); save(); }
+  function metaToRow() {
+    var m = state.meta;
+    return {
+      id: 1, empresa: m.empresa, cliente: m.cliente, moneda: m.moneda,
+      periodo_meses: m.periodoMeses, meses_pedido_default: m.mesesPedidoDefault,
+      unidad_vista: m.unidadVista, sucursal_lk: m.sucursalLK,
+      updated_at: new Date().toISOString()
+    };
+  }
+  function setMeta(patch) {
+    state.meta = Object.assign(state.meta, patch);
+    if (sb) fire(sb.from('osa_config').upsert(metaToRow(), { onConflict: 'id' }));
+  }
 
   /* ---------- Unidades de visualización (cajas / unidades) ---------- */
   // El stock se guarda siempre en UNIDADES (canónico: el stock inicial, las
@@ -108,7 +141,8 @@
   function getUnidadVista() { return state.meta.unidadVista === 'unidades' ? 'unidades' : 'cajas'; }
   function setUnidadVista(v) {
     state.meta.unidadVista = (v === 'unidades') ? 'unidades' : 'cajas';
-    save(); return state.meta.unidadVista;
+    if (sb) fire(sb.from('osa_config').upsert(metaToRow(), { onConflict: 'id' }));
+    return state.meta.unidadVista;
   }
   // Unidades por caja de un artículo (id u objeto). 1 si no se conoce.
   function uxcDe(idOrArt) {
@@ -127,9 +161,11 @@
     var idx = idxCatalogo(), n = 0;
     Object.keys(map || {}).forEach(function (code) {
       var a = matchCodigo(code, idx), u = Math.round(map[code]);
-      if (a && u > 0 && a.uxc !== u) { a.uxc = u; n++; }
+      if (a && u > 0 && a.uxc !== u) {
+        a.uxc = u; n++;
+        if (sb) fire(sb.from('osa_articulos').update({ uxc: u, updated_at: new Date().toISOString() }).eq('id', a.id));
+      }
     });
-    if (n) save();
     return n;
   }
 
@@ -164,7 +200,7 @@
       activo: data.activo !== false
     };
     state.articulos.push(a);
-    save();
+    if (sb) fire(sb.from('osa_articulos').insert(artToRow(a)));
     return a;
   }
   function updateArticulo(id, data) {
@@ -182,49 +218,67 @@
     if (data.promedioManual !== undefined) a.promedioManual = optNum(data.promedioManual);
     if (data.mesesPedido !== undefined) a.mesesPedido = optNum(data.mesesPedido);
     if (data.activo !== undefined) a.activo = !!data.activo;
-    save();
+    if (sb) fire(sb.from('osa_articulos').update(artToRow(a)).eq('id', a.id));
     return a;
   }
   function removeArticulo(id) {
     state.articulos = state.articulos.filter(function (a) { return a.id !== id; });
     state.movimientos = state.movimientos.filter(function (m) { return m.articuloId !== id; });
-    save();
+    // El FK on delete cascade borra las filas de ventas/entregas/ajustes del artículo.
+    if (sb) fire(sb.from('osa_articulos').delete().eq('id', id));
   }
 
   /* ---------- Movimientos ---------- */
   // tipo: 'entrega' (suma) | 'venta' (resta) | 'ajuste' (suma, puede ser negativo)
+  // Cada tipo va a su tabla: osa_ventas / osa_entregas / osa_ajustes.
   function addMovimiento(m) {
     var mov = {
-      id: uid(),
+      id: uid(), dbId: null,
       articuloId: m.articuloId,
-      tipo: m.tipo,
+      tipo: (m.tipo === 'venta' || m.tipo === 'entrega') ? m.tipo : 'ajuste',
       cantidad: Math.round(num(m.cantidad, 0)),
       fecha: m.fecha || hoyISO(),
       nota: (m.nota || '').trim(),
-      quincena: m.quincena || null   // ventas: quincena (1–15 / 16–fin) a la que pertenece la carga
+      quincena: m.quincena || null,
+      _formato: m.formato || null
     };
     state.movimientos.push(mov);
-    save();
+    if (sb) {
+      sb.from(tablaDe(mov.tipo)).insert(movToRow(mov)).select('id').maybeSingle()
+        .then(function (r) {
+          if (r.error) { fail(r.error); return; }
+          if (r.data) mov.dbId = r.data.id; // id en memoria queda estable; se borra por dbId
+        }, fail);
+    }
     return mov;
   }
   function addMovimientosBatch(arr) {
-    var creados = [];
+    var creados = [], grupos = { venta: [], entrega: [], ajuste: [] };
     for (var i = 0; i < arr.length; i++) {
       var c = Math.round(num(arr[i].cantidad, 0));
       if (c === 0) continue;
+      var tipo = (arr[i].tipo === 'venta' || arr[i].tipo === 'entrega') ? arr[i].tipo : 'ajuste';
       var mov = {
-        id: uid(),
-        articuloId: arr[i].articuloId,
-        tipo: arr[i].tipo,
-        cantidad: c,
-        fecha: arr[i].fecha || hoyISO(),
-        nota: (arr[i].nota || '').trim(),
-        quincena: arr[i].quincena || null
+        id: uid(), dbId: null, articuloId: arr[i].articuloId, tipo: tipo,
+        cantidad: c, fecha: arr[i].fecha || hoyISO(), nota: (arr[i].nota || '').trim(),
+        quincena: arr[i].quincena || null, _formato: arr[i].formato || null
       };
       state.movimientos.push(mov);
       creados.push(mov);
+      grupos[tipo].push(mov);
     }
-    if (creados.length) save(); // un solo guardado para todo el lote
+    if (sb) {
+      ['venta', 'entrega', 'ajuste'].forEach(function (tipo) {
+        var movs = grupos[tipo]; if (!movs.length) return;
+        sb.from(tablaDe(tipo)).insert(movs.map(movToRow)).select('id')
+          .then(function (r) {
+            if (r.error) { fail(r.error); return; }
+            (r.data || []).forEach(function (row, idx) {
+              if (movs[idx]) movs[idx].dbId = row.id; // id en memoria estable; se borra por dbId
+            });
+          }, fail);
+      });
+    }
     return creados;
   }
   function getMovimientos(filter) {
@@ -239,8 +293,12 @@
     return list;
   }
   function removeMovimiento(id) {
+    var mov = null;
+    for (var i = 0; i < state.movimientos.length; i++) {
+      if (state.movimientos[i].id === id) { mov = state.movimientos[i]; break; }
+    }
     state.movimientos = state.movimientos.filter(function (m) { return m.id !== id; });
-    save();
+    if (sb && mov && mov.dbId != null) fire(sb.from(tablaDe(mov.tipo)).delete().eq('id', mov.dbId));
   }
 
   /* ---------- Lógica de stock ---------- */
@@ -551,68 +609,56 @@
     return (c && c.count > 0) ? c : null;
   }
 
-  /* ---------- Pedidos ---------- */
-  function crearPedido(items, nota) {
-    var clean = items
-      .map(function (it) {
-        var a = getArticulo(it.articuloId);
-        return {
-          articuloId: it.articuloId,
-          codigo: a ? a.codigo : '',
-          nombre: a ? a.nombre : '(artículo)',
-          cantidad: Math.round(num(it.cantidad, 0))
-        };
-      })
-      .filter(function (it) { return it.cantidad > 0; });
-    if (!clean.length) return null;
-    var p = { id: uid(), fecha: hoyISO(), estado: 'pendiente', nota: (nota || '').trim(), items: clean };
-    state.pedidos.unshift(p);
-    save();
-    return p;
-  }
-  function getPedidos() { return state.pedidos.slice(); }
-  function getPedido(id) {
-    for (var i = 0; i < state.pedidos.length; i++) if (state.pedidos[i].id === id) return state.pedidos[i];
-    return null;
-  }
-  // Marcar entregado: genera movimientos de 'entrega' (repone stock en el cliente)
-  function marcarPedidoEntregado(id) {
-    var p = getPedido(id);
-    if (!p || p.estado === 'entregado') return null;
-    p.items.forEach(function (it) {
-      if (getArticulo(it.articuloId)) {
-        addMovimiento({
-          articuloId: it.articuloId,
-          tipo: 'entrega',
-          cantidad: it.cantidad,
-          fecha: hoyISO(),
-          nota: 'Reposición pedido #' + p.id.slice(-5).toUpperCase()
-        });
-      }
-    });
-    p.estado = 'entregado';
-    p.entregadoEl = hoyISO();
-    save();
-    return p;
-  }
-  function eliminarPedido(id) {
-    state.pedidos = state.pedidos.filter(function (p) { return p.id !== id; });
-    save();
-  }
-
   /* ---------- Respaldo / datos ---------- */
   function exportData() { return JSON.stringify(state, null, 2); }
-  function importData(json) {
+  // Importa un respaldo JSON a Supabase: reemplaza artículos y movimientos.
+  async function importData(json) {
+    if (!sb) throw new Error('Supabase no disponible');
     var p = typeof json === 'string' ? JSON.parse(json) : json;
-    var base = blank();
-    base.meta = Object.assign(base.meta, p.meta || {});
-    base.articulos = Array.isArray(p.articulos) ? p.articulos : [];
-    base.movimientos = Array.isArray(p.movimientos) ? p.movimientos : [];
-    base.pedidos = Array.isArray(p.pedidos) ? p.pedidos : [];
-    state = base;
-    save();
+    var meta = Object.assign(blank().meta, p.meta || {});
+    var arts = Array.isArray(p.articulos) ? p.articulos : [];
+    var movs = Array.isArray(p.movimientos) ? p.movimientos : [];
+    await borrarTodo();
+    // Artículos
+    state.articulos = arts.map(function (a) {
+      if (!a.id) a.id = 'a_' + (a.codigo || uid());
+      return a;
+    });
+    if (state.articulos.length) {
+      await sb.from('osa_articulos').upsert(state.articulos.map(artToRow), { onConflict: 'id' });
+    }
+    // Movimientos por tipo (movToRow resuelve codigo/uxc desde state.articulos)
+    var porTipo = { venta: [], entrega: [], ajuste: [] };
+    movs.forEach(function (m) {
+      var tipo = (m.tipo === 'venta' || m.tipo === 'entrega') ? m.tipo : 'ajuste';
+      porTipo[tipo].push(movToRow({
+        tipo: tipo, articuloId: m.articuloId, cantidad: m.cantidad,
+        fecha: m.fecha, nota: m.nota, quincena: m.quincena, _formato: m.formato
+      }));
+    });
+    for (var t in porTipo) { if (porTipo[t].length) await sb.from(tablaDe(t)).insert(porTipo[t]); }
+    // Config
+    state.meta = meta;
+    await sb.from('osa_config').upsert(metaToRow(), { onConflict: 'id' });
+    await loadAll();
   }
-  function resetAll() { state = blank(); save(); }
+  // Borra todos los datos OSA (movimientos + artículos) en Supabase.
+  function borrarTodo() {
+    return Promise.all([
+      sb.from('osa_ventas').delete().eq('cod_cliente', COD_CLIENTE),
+      sb.from('osa_entregas').delete().eq('cod_cliente', COD_CLIENTE),
+      sb.from('osa_ajustes').delete().eq('cod_cliente', COD_CLIENTE)
+    ]).then(function () {
+      return sb.from('osa_articulos').delete().eq('cod_cliente', COD_CLIENTE);
+    });
+  }
+  // "Borrar todo": vacía movimientos y artículos y vuelve a sembrar el catálogo.
+  async function resetAll() {
+    if (!sb) { state = blank(); return; }
+    await borrarTodo();
+    await seedArticulos();
+    await loadAll();
+  }
 
   /* ---------- Catálogo real (Loekemeyer · cliente Osa Distribuidora SRL) ----------
      [codigo, nombre, ventasRanking]  ·  ordenado por total (mayor a menor).
@@ -784,101 +830,32 @@
     '816E': 10, '584E': 20
   };
 
-  // Construye el estado inicial con el catálogo real precargado.
-  function seedReal() {
-    var st = blank();
-    st.meta.empresa = 'Loekemeyer';
-    st.meta.cliente = 'Osa Distribuidora SRL';
-    st.meta.moneda = 'ARS';
-    st.meta.periodoMeses = 17;
-    st.meta.mesesPedidoDefault = 2;
-    st.meta.seedVersion = SEED_VERSION;
-    st.meta.stockBaseline = STOCK_BASELINE;
-    CATALOGO.forEach(function (row) {
+  // Filas del catálogo real para sembrar osa_articulos (una sola vez).
+  function seedRows() {
+    return CATALOGO.map(function (row) {
       var codigo = row[0], nombre = row[1], totalCajas = row[2];
       var uxc = uxcSeed(codigo);    // unidades por caja (Uni×Caja)
       var maxCajas = MAX_CAJAS[codigo];
-      st.articulos.push({
-        id: 'a_' + codigo, codigo: codigo, nombre: nombre, descripcion: '',
-        foto: placeholder(nombre), precio: 0,
-        stockInicial: STOCK_INICIAL[codigo] || 0, // stock real del cliente EN UNIDADES (Existencia, informe 23/06/26)
-        totalHistorico: totalCajas * uxc, // ventas conocidas EN UNIDADES (el ranking viene EN CAJAS → × Uni×Caja)
-        uxc: uxc,                     // unidades por caja (para mostrar en cajas / normalizar imports)
-        stockMaximo: (maxCajas != null) ? maxCajas * uxc : null, // nivel objetivo EN UNIDADES (máx. cajas × Uni×Caja)
-        promedioManual: null,         // sin override: usa el promedio automático
-        mesesPedido: null,            // sin override: usa meta.mesesPedidoDefault
-        activo: true
-      });
+      return {
+        id: 'a_' + codigo, cod_cliente: COD_CLIENTE, codigo: codigo, nombre: nombre, descripcion: '',
+        precio: 0,
+        stock_inicial: STOCK_INICIAL[codigo] || 0,   // stock real (Existencia, informe 23/06/26)
+        total_historico: totalCajas * uxc,           // ventas conocidas EN UNIDADES (ranking en cajas × Uni×Caja)
+        uxc: uxc,
+        stock_maximo: (maxCajas != null) ? maxCajas * uxc : null, // nivel objetivo EN UNIDADES
+        promedio_manual: null, meses_pedido: null, activo: true, foto: null
+      };
     });
-    return st;
   }
-
-  // Botón "Cargar datos de ejemplo" = restaurar el catálogo real.
-  function loadDemo() { state = seedReal(); save(); }
-
-  // Aplica un catálogo precargado nuevo SIN destruir los datos del usuario.
-  // - Actualiza los campos "del catálogo" (nombre, total de ventas conocidas).
-  // - Agrega los artículos nuevos que tenga el catálogo.
-  // - Conserva siempre movimientos, pedidos y los campos que toca el usuario
-  //   (descripción, foto, precio, activo y los overrides promedioManual/mesesPedido).
-  // - El stock inicial solo se pisa si todavía no hay nada que proteger: ni stock
-  //   real cargado (meta.datosReales) ni movimientos/pedidos registrados. Si ya
-  //   hay historial, pisarlo descuadraría el saldo, así que se respeta.
-  function mergeSeed() {
-    var fresh = seedReal();
-    var protegerInicial = !!state.meta.datosReales ||
-      state.movimientos.length > 0 || state.pedidos.length > 0;
-    // Si cambió el baseline de stock inicial, se reaplica una vez aunque haya
-    // historial (corrección puntual del punto de partida).
-    var baselineNuevo = (state.meta.stockBaseline || 0) < STOCK_BASELINE;
-    var aplicarInicial = baselineNuevo || !protegerInicial;
-    var uxcNuevo = (state.meta.uxcBaseline || 0) < UXC_BASELINE; // reaplica Uni×Caja autoritativa una vez
-    var byCode = {};
-    state.articulos.forEach(function (a) { if (a.codigo) byCode[a.codigo] = a; });
-    fresh.articulos.forEach(function (na) {
-      var ex = na.codigo ? byCode[na.codigo] : null;
-      if (!ex) { state.articulos.push(na); return; } // artículo nuevo del catálogo
-      ex.nombre = na.nombre;
-      ex.totalHistorico = na.totalHistorico;
-      // Uni×Caja autoritativa (Cotizador Loekemeyer): al subir UXC_BASELINE se reaplica
-      // una vez a todos; si no, solo se setea cuando falta o está en el default 1.
-      // Después se respeta la que cargue un import.
-      if (uxcNuevo && na.uxc > 0) ex.uxc = na.uxc;
-      else if (!ex.uxc || (ex.uxc === 1 && na.uxc > 1)) ex.uxc = na.uxc;
-      // Stock máximo objetivo: se aplica el del seed solo la primera vez (cuando el
-      // artículo todavía no tiene el campo). Después se respeta lo que edite el usuario.
-      if (ex.stockMaximo === undefined) ex.stockMaximo = na.stockMaximo;
-      if (ex.promedioManual === undefined) ex.promedioManual = null;
-      if (ex.mesesPedido === undefined) ex.mesesPedido = null;
-      if (aplicarInicial) ex.stockInicial = na.stockInicial;
-    });
-    state.meta.stockBaseline = STOCK_BASELINE;
-    state.meta.uxcBaseline = UXC_BASELINE;
-    // Fusionar duplicados (ej. a_580 → a_580E): mover movimientos, sumar stock
-    // inicial al canónico y eliminar el duplicado.
-    FUSIONAR.forEach(function (par) {
-      var from = getArticulo(par[0]), to = getArticulo(par[1]);
-      if (!from || !to) return;
-      state.movimientos.forEach(function (m) { if (m.articuloId === from.id) m.articuloId = to.id; });
-      to.stockInicial = (to.stockInicial || 0) + (from.stockInicial || 0);
-      state.articulos = state.articulos.filter(function (a) { return a.id !== from.id; });
-    });
-    // Artículos discontinuados: quitar el artículo y limpiar sus movimientos y
-    // los renglones de pedidos que lo referencian.
-    DISCONTINUADOS.forEach(function (code) {
-      var ids = state.articulos.filter(function (a) { return a.codigo === code; })
-        .map(function (a) { return a.id; });
-      if (!ids.length) return;
-      var borrado = function (ref) { return ids.indexOf(ref) >= 0; };
-      state.movimientos = state.movimientos.filter(function (m) { return !borrado(m.articuloId); });
-      state.pedidos.forEach(function (p) {
-        if (p.items) p.items = p.items.filter(function (it) { return !borrado(it.articuloId); });
-      });
-      state.articulos = state.articulos.filter(function (a) { return a.codigo !== code; });
-    });
-    if (state.meta.mesesPedidoDefault === undefined) state.meta.mesesPedidoDefault = 2;
-    state.meta.seedVersion = SEED_VERSION;
-    save();
+  // Siembra el catálogo en Supabase (idempotente por id; no pisa lo ya cargado).
+  function seedArticulos() {
+    return sb.from('osa_articulos').upsert(seedRows(), { onConflict: 'id', ignoreDuplicates: true });
+  }
+  // "Cargar catálogo de ejemplo" = re-sembrar el catálogo real (no borra movimientos).
+  async function loadDemo() {
+    if (!sb) return;
+    await seedArticulos();
+    await loadAll();
   }
 
   /* ---------- Utilidades ---------- */
@@ -920,18 +897,54 @@
   function clamp(v) { return Math.max(0, Math.min(255, v)); }
   function hx(v) { var s = v.toString(16); return s.length === 1 ? '0' + s : s; }
 
-  // Inicializa el estado (luego de definir catálogo, ventas y seed)
-  var state = load();
-  // Migración por versión de seed: si el catálogo precargado cambió, se fusiona
-  // de forma NO destructiva (ver mergeSeed). Nunca borra movimientos, pedidos ni
-  // el stock real ya cargado.
-  (function ensureSeed() {
-    if (state.meta.seedVersion === SEED_VERSION) return;
-    mergeSeed();
-  })();
+  /* ---------- Carga inicial / init (Supabase) ---------- */
+  // Hidrata el estado en memoria desde Supabase. Requiere sesión OSA (lanza
+  // 'no-session' si no hay login). app.js la espera antes del primer render.
+  async function init() {
+    if (!sb) throw new Error('supabase-js no cargado');
+    var sess = (await sb.auth.getSession()).data.session;
+    if (!sess) throw new Error('no-session');
+    await loadAll();
+    return true;
+  }
+  async function loadAll() {
+    await loadConfig();
+    await loadArticulos();
+    await loadMovimientos();
+  }
+  async function loadConfig() {
+    var r = await sb.from('osa_config').select('*').eq('id', 1).maybeSingle();
+    var c = r.data;
+    if (!c) { await sb.from('osa_config').upsert(metaToRow(), { onConflict: 'id' }); c = metaToRow(); }
+    state.meta = {
+      empresa: c.empresa || 'Loekemeyer', cliente: c.cliente || 'Osa Distribuidora SRL',
+      moneda: c.moneda || 'ARS', periodoMeses: c.periodo_meses || 17,
+      mesesPedidoDefault: c.meses_pedido_default || 2,
+      unidadVista: c.unidad_vista === 'unidades' ? 'unidades' : 'cajas',
+      sucursalLK: c.sucursal_lk || 'Zuviria 5352- Villa Lugano'
+    };
+  }
+  async function loadArticulos() {
+    var r = await sb.from('osa_articulos').select('*');
+    var rows = r.data || [];
+    if (!rows.length) { await seedArticulos(); r = await sb.from('osa_articulos').select('*'); rows = r.data || []; }
+    state.articulos = rows.map(rowToArt);
+  }
+  async function loadMovimientos() {
+    var res = await Promise.all([
+      sb.from('osa_ventas').select('id,articulo_id,unidades,fecha,nota,quincena'),
+      sb.from('osa_entregas').select('id,articulo_id,unidades,fecha,nota'),
+      sb.from('osa_ajustes').select('id,articulo_id,cantidad,fecha,nota')
+    ]);
+    state.movimientos = []
+      .concat((res[0].data || []).map(ventaRowToMov))
+      .concat((res[1].data || []).map(entregaRowToMov))
+      .concat((res[2].data || []).map(ajusteRowToMov));
+  }
 
   /* ---------- API pública ---------- */
   window.Store = {
+    init: init,
     getMeta: getMeta, setMeta: setMeta,
     getUnidadVista: getUnidadVista, setUnidadVista: setUnidadVista,
     uxcDe: uxcDe, enVista: enVista, actualizarUxcDesde: actualizarUxcDesde,
@@ -947,8 +960,6 @@
     estado: estado, sugerido: sugerido, necesitaPedido: necesitaPedido, pedidoSugerido: pedidoSugerido,
     promedioMensual: promedioMensual, promedioMensualAuto: promedioMensualAuto,
     mesesPedido: mesesPedido, puntoPedido: puntoPedido,
-    crearPedido: crearPedido, getPedidos: getPedidos, getPedido: getPedido,
-    marcarPedidoEntregado: marcarPedidoEntregado, eliminarPedido: eliminarPedido,
     exportData: exportData, importData: importData, resetAll: resetAll, loadDemo: loadDemo,
     setSaveErrorHandler: function (fn) { onSaveError = fn; },
     placeholder: placeholder, hoyISO: hoyISO
