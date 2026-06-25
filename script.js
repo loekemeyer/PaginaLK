@@ -522,12 +522,19 @@ function elegirFormato(which) {
   closeOsaFormatChooser();
 }
 
-// Muestra el selector de formato cuando ingresa OSA (login genuino). Solo una
-// vez por sesión de pestaña, para no reabrirlo en cada refresco de auth.
-function maybeShowOsaFormatChooser() {
+// Muestra el selector de formato cuando entra OSA: en un login nuevo (force) y
+// también cuando abre la página ya logueado. Una vez por sesión de navegador
+// (sessionStorage) para no reabrirlo en cada recarga; siempre accesible además
+// desde el menú de usuario → "Formato OSA".
+function maybeShowOsaFormatChooser(opts) {
+  opts = opts || {};
   if (!isOsaClient()) return;
-  if (window.__osaChooserShown) return;
-  window.__osaChooserShown = true;
+  const modal = $("osaFormatModal");
+  if (modal && modal.classList.contains("open")) return; // ya está abierto
+  try {
+    if (!opts.force && sessionStorage.getItem("osa_chooser_seen") === "1") return;
+    sessionStorage.setItem("osa_chooser_seen", "1");
+  } catch (e) {}
   openOsaFormatChooser();
 }
 
@@ -10424,6 +10431,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Cargar sesión inicial y productos
   // =============================
   await refreshAuthState();
+  // Cliente OSA que abre la página ya logueado: ofrecer el selector de formato.
+  maybeShowOsaFormatChooser();
   await loadProductsFromDB();
 
   // =============================
@@ -10574,7 +10583,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     // Cliente OSA: ofrecer elegir entre formato regular y "Formato OSA".
-    if (_event === "SIGNED_IN") maybeShowOsaFormatChooser();
+    if (_event === "SIGNED_IN") maybeShowOsaFormatChooser({ force: true });
   });
 
   // Al volver a la pestaña solo refrescar UI, no tocar auth (Supabase lo hace solo)
