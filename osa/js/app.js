@@ -1,5 +1,5 @@
 /* ============================================================
-   StockRotativo · Interfaz y navegación (5 módulos)
+   Pedido Automático · Interfaz y navegación (5 módulos)
    1 Stocks · 2 Movimientos · 3 Punto de pedido · 4 Entregas Loeke · 5 Ventas OSA
    ============================================================ */
 (function () {
@@ -1000,7 +1000,7 @@
       '<th class="num">Máximo</th><th class="num">A pedir</th></tr></thead>' +
       '<tbody>' + rows + '</tbody></table>' +
       '<div class="tot">Total ' + unidadLbl() + ' a pedir: ' + fmtInt(totalU) + '</div>' +
-      '<p class="foot">Generado con StockRotativo · ' + fmtFecha(S.hoyISO()) + '</p>' +
+      '<p class="foot">Generado con Pedido Automático · ' + fmtFecha(S.hoyISO()) + '</p>' +
       '</body></html>';
     var w = window.open('', '_blank');
     if (!w) { toast('Permití las ventanas emergentes para imprimir', 'warn'); return; }
@@ -1336,7 +1336,7 @@
       '<li><strong style="color:var(--text)">Entregas Loeke</strong> y <strong style="color:var(--text)">Ventas OSA</strong>: cargás el movimiento y el stock se actualiza solo.</li>' +
       '</ol></div></div>';
 
-    html += '<p class="muted text-c" style="margin-top:20px;font-size:12px;">StockRotativo · versión ' + APP_VERSION + '</p>';
+    html += '<p class="muted text-c" style="margin-top:20px;font-size:12px;">Pedido Automático · versión ' + APP_VERSION + '</p>';
     return html;
   }
   afterRender.config = function () {

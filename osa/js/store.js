@@ -1,5 +1,5 @@
 /* ============================================================
-   StockRotativo · Capa de datos y lógica de negocio
+   Pedido Automático · Capa de datos y lógica de negocio
    Fuente de verdad: Supabase (sin localStorage). El estado se hidrata desde
    las tablas osa_* al iniciar (Store.init) y cada cambio se escribe directo.
    El stock se calcula (inicial + entregas − ventas ± ajustes).
