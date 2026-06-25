@@ -438,7 +438,7 @@ body {
 /* Sidebar categorías */
 .categories-sidebar {
   position: sticky;
-  top: calc(86px + var(--nc-carousel-h, 0px) + 24px);
+  top: calc(86px + 24px);
   align-self: start;
   border: 1px solid #eee;
   background: #fff;
@@ -448,7 +448,7 @@ body {
      para acceder a todas las categorías sin que se rompa el layout. */
   max-height: min(
     720px,
-    calc(100vh - 86px - var(--nc-carousel-h, 0px) - 44px)
+    calc(100vh - 86px - 44px)
   );
   overflow-y: auto;
   scrollbar-gutter: stable;
@@ -6540,9 +6540,10 @@ body.section-perfil #navSearch {
   border: 1px solid #ececec;
   border-radius: 14px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
-  position: sticky;
-  top: 86px;
-  z-index: 100;
+  /* No sticky: el carrusel scrollea con la página y desaparece al scrollear
+     (el cliente no lo ve más una vez que baja). Antes quedaba pegado al header. */
+  position: relative;
+  z-index: 1;
   transform-origin: top center;
   transition:
     border-radius 0.18s ease,
@@ -11740,9 +11741,9 @@ body.is-vendor-user.is-vendor-own-mode #menuAnalisisMobile {
     padding: 0 4px;
   }
 
-  /* Carrusel novedades: bajar altura general en mobile */
+  /* Carrusel novedades: no sticky, scrollea con la página */
   .new-carousel {
-    top: 76px; /* matching mobile header height */
+    top: auto;
   }
 
   /* Botón "Mostrar novedades" pill — más pequeño */
@@ -11932,9 +11933,9 @@ body.is-vendor-user.is-vendor-own-mode #menuAnalisisMobile {
     z-index: 90 !important;
   }
 
-  /* Carrusel novedades sticky offset matching nuevo header */
+  /* Carrusel novedades: no sticky, scrollea con la página */
   .new-carousel {
-    top: 70px !important;
+    top: auto !important;
   }
   .nc-show-btn {
     top: 80px !important;
@@ -11991,7 +11992,7 @@ body.is-vendor-user.is-vendor-own-mode #menuAnalisisMobile {
     top: 62px !important;
   }
   .new-carousel {
-    top: 62px !important;
+    top: auto !important;
   }
   .nc-show-btn {
     top: 72px !important;
