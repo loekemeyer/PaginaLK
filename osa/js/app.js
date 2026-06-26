@@ -210,7 +210,6 @@
     if (ui.view === 'stocks') actions = btn('nuevo-art', 'primary', iconPlus(), 'Nuevo artículo') + btn('enviar-loeke', 'ghost', iconSend(), 'Enviar a Loekemeyer') + btn('print-sugerido', 'ghost', iconPrint(), 'Imprimir sugerido');
     else if (ui.view === 'movimientos') actions = btn('nuevo-ajuste', 'ghost', iconPlus(), 'Ajuste manual');
     else if (ui.view === 'puntopedido') actions = btn('guardar-punto', 'primary', iconSave(), 'Guardar');
-    else if (ui.view === 'entregas') actions = btn('importar-entregas', 'primary', iconUpload(), 'Importar Excel');
     else if (ui.view === 'ventas') actions = btn('importar-ventas', 'primary', iconUpload(), 'Importar informe');
     else if (ui.view === 'cargas') actions = btn('importar-ventas', 'primary', iconUpload(), 'Importar informe');
     $('#topbarActions').innerHTML = actions;
@@ -538,24 +537,27 @@
     var arts = S.getArticulos({ soloActivos: true });
     if (!arts.length) return emptyApp();
     var esVenta = tipo === 'venta';
-    var explica = esVenta
-      ? 'Cargá las cajas que OSA <strong>vendió</strong> a sus clientes. Salen del stock.'
-      : 'Cargá las cajas que <strong>Loeke entregó</strong> a OSA. Entran al stock.';
-    var fmtFut = esVenta
-      ? 'Importá el informe de ventas (PDF o texto). Viene en <strong>unidades</strong>: lo paso a cajas solo. Elegís la quincena al confirmar y el módulo <strong>Cargas</strong> lleva el control.'
-      : 'Importá el Excel de facturación (Loeke a OSA). Detecto solo si viene en cajas o en unidades.';
 
-    var html = '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>' + explica + ' <span class="muted">' + fmtFut + '</span></div></div>';
-    html += '<div class="row" style="margin-top:16px;">' +
-      (esVenta ? btn('importar-ventas', 'primary', iconUpload(), 'Importar informe (PDF / texto)')
-               : btn('importar-entregas', 'primary', iconUpload(), 'Importar Excel (Loeke → OSA)')) +
-      (esVenta ? btn('ir-cargas', 'ghost', iconCalendar(), 'Ver control de cargas') : '') +
-      '</div>';
+    var html = '';
+    if (esVenta) {
+      var explica = 'Cargá las cajas que OSA <strong>vendió</strong> a sus clientes. Salen del stock.';
+      var fmtFut = 'Importá el informe de ventas (PDF o texto). Viene en <strong>unidades</strong>: lo paso a cajas solo. Elegís la quincena al confirmar y el módulo <strong>Cargas</strong> lleva el control.';
+      html += '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>' + explica + ' <span class="muted">' + fmtFut + '</span></div></div>';
+      html += '<div class="row" style="margin-top:16px;">' +
+        btn('importar-ventas', 'primary', iconUpload(), 'Importar informe (PDF / texto)') +
+        btn('ir-cargas', 'ghost', iconCalendar(), 'Ver control de cargas') +
+        '</div>';
+    } else {
+      // Las entregas de Loeke entran al stock SOLAS desde logística (Virgilio). La
+      // vista queda como historial de consulta; ya no se importan a mano.
+      html += '<div class="callout"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg><div>Las entregas de <strong>Loeke</strong> entran al stock <strong>automáticamente</strong> desde logística. Acá queda el historial; no hace falta cargar nada a mano.</div></div>';
+    }
 
-    // Últimos movimientos del tipo, como referencia rápida de lo ya cargado.
-    var movs = S.getMovimientos({ tipo: esVenta ? 'venta' : 'entrega' }).slice(0, 8);
+    // Historial de movimientos del tipo (ventas: últimos 8; entregas: historial).
+    var movs = S.getMovimientos({ tipo: esVenta ? 'venta' : 'entrega' }).slice(0, esVenta ? 8 : 100);
     if (movs.length) {
-      html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>Últimos registros</h2></div>' +
+      var titulo = esVenta ? 'Últimos registros' : 'Historial de entregas';
+      html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>' + titulo + '</h2></div>' +
         '<div class="table-wrap"><table class="table"><thead><tr><th>Fecha</th><th>Artículo</th>' +
         (esVenta ? '<th>Quincena</th>' : '') + '<th class="num">Cantidad</th></tr></thead><tbody>';
       movs.forEach(function (m) {
@@ -566,6 +568,8 @@
           '<td class="num"><strong>' + qf(Math.abs(m.cantidad), a) + '</strong></td></tr>';
       });
       html += '</tbody></table></div></div>';
+    } else if (!esVenta) {
+      html += '<div class="card" style="margin-top:18px;"><div class="muted" style="padding:16px;">Todavía no hay entregas registradas. Van a aparecer acá cuando logística cargue una tanda.</div></div>';
     }
     return html;
   }
