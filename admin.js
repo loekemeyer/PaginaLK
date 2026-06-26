@@ -6523,6 +6523,29 @@ async function cargarEstadisticaMadre(forceReload) {
       };
     });
 
+    // 1.b) Línea Loke: completar códigos que no están en products (familia "Loke").
+    var lokeResp = await sb.from("loke_products").select("cod, description, uxb");
+    (lokeResp.data || []).forEach(function (p) {
+      var k = String(p.cod || "").trim().toUpperCase();
+      if (!k || productByCod[k]) return; // products tiene prioridad
+      productByCod[k] = { cod: p.cod, desc: p.description || k, uxb: Number(p.uxb) || 1, active: true, familia: "Loke" };
+    });
+
+    // 1.c) Remaps y exclusiones — mismas reglas (tablas) que el RPC fn_proyeccion_madre,
+    //      para que el módulo y el RPC nunca se desincronicen.
+    var remapMap = {};
+    var remapResp = await sb.from("sales_item_remap").select("from_code, to_code");
+    (remapResp.data || []).forEach(function (r) {
+      var f = String(r.from_code || "").trim().toUpperCase();
+      if (f) remapMap[f] = String(r.to_code || "").trim().toUpperCase();
+    });
+    var excludedSet = {};
+    var exclResp = await sb.from("sales_excluded_items").select("item_code");
+    (exclResp.data || []).forEach(function (e) {
+      var c = String(e.item_code || "").trim().toUpperCase();
+      if (c) excludedSet[c] = true;
+    });
+
     // 2) Cargar TODAS las fuentes en cascada — primer éxito gana.
     // Orden: customer-aware primero (necesario para proyección por cliente).
     // Si solo responde una fuente customer-blind, la proyección degrada a la fórmula vieja.
@@ -6755,6 +6778,8 @@ async function cargarEstadisticaMadre(forceReload) {
     }
     allRows.forEach(function (row) {
       var item = String(row.item_code || "").trim().toUpperCase();
+      if (excludedSet[item]) return;             // descuentos / no-productos
+      if (remapMap[item]) item = remapMap[item];  // consolidar ventas mal-codeadas
       var cust = row.customer_code ? String(row.customer_code).trim() : null;
       addRow(item, String(row.ym || ""), Number(row.unidades) || 0, cust);
     });
