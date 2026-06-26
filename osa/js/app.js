@@ -312,24 +312,40 @@
       chip('todos', 'Todos') + chip('reponer', 'Para reponer') + chip('ok', 'En nivel') +
       '</div></div>';
 
-    html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr>' +
-      '<th>Artículo</th><th class="num">Stock hoy <span class="muted">(' + unidadCorta() + ')</span></th><th class="num">Máximo</th>' +
-      '<th class="num">Sugerido</th><th>Estado</th></tr></thead><tbody>';
-    arts.forEach(function (a) {
+    var hayMaximos = arts.some(function (a) { return a.stockMaximo != null; });
+    // "Discontinuo": se vendió alguna vez (totalHistorico > 0) pero el cliente no le
+    // puso máximo. Solo aplica si el cliente YA empezó a cargar máximos; si todavía
+    // no hay ningún máximo, es que aún no los cargó → no se agrupa nada.
+    function esDiscontinuo(a) {
+      return hayMaximos && a.stockMaximo == null && (a.totalHistorico || 0) > 0;
+    }
+    var normales = [], discontinuos = [];
+    arts.forEach(function (a) { (esDiscontinuo(a) ? discontinuos : normales).push(a); });
+
+    function filaArt(a, disc) {
       var s = stocks[a.id];
       var pp = S.puntoPedido(a);
       var sg = S.sugerido(a, s);
       var e = S.estado(a, s);
-      var clase = sg > 0 ? 'reponer' : 'ok';
-      html += '<tr data-art="' + a.id + '" data-clase="' + clase + '" ' +
+      var clase = disc ? 'discontinuo' : (sg > 0 ? 'reponer' : 'ok');
+      return '<tr data-art="' + a.id + '" data-clase="' + clase + '" ' +
         'data-search="' + esc((a.nombre + ' ' + (a.codigo || '')).toLowerCase()) + '" style="cursor:pointer;">' +
         '<td><div class="cell-art">' + imgTag(a) + '<div><div class="nm">' + esc(a.nombre) + '</div><div class="cd">' + esc(a.codigo || '') + '</div></div></div></td>' +
         '<td class="num"><strong>' + qf(s, a) + '</strong></td>' +
         '<td class="num muted">' + (a.stockMaximo != null ? qf(pp, a) : '—') + '</td>' +
         '<td class="num">' + (sg > 0 ? '<span class="badge badge--warn">+' + qf(sg, a) + '</span>' : '—') + '</td>' +
-        '<td>' + badgeEstado(e) + '</td>' +
+        '<td>' + (disc ? '<span class="muted">Discontinuo</span>' : badgeEstado(e)) + '</td>' +
         '</tr>';
-    });
+    }
+
+    html += '<div class="card"><div class="table-wrap"><table class="table"><thead><tr>' +
+      '<th>Artículo</th><th class="num">Stock hoy <span class="muted">(' + unidadCorta() + ')</span></th><th class="num">Máximo</th>' +
+      '<th class="num">Sugerido</th><th>Estado</th></tr></thead><tbody>';
+    normales.forEach(function (a) { html += filaArt(a, false); });
+    if (discontinuos.length) {
+      html += '<tr class="row-sep" data-sep="1"><td colspan="5" style="padding:13px 16px;background:#f6f7f9;border-top:2px solid var(--border,#e5e7eb);font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted,#6b7280);">Discontinuos <span style="font-weight:500;text-transform:none;letter-spacing:0;">· se vendieron alguna vez y todavía no tienen máximo</span></td></tr>';
+      discontinuos.forEach(function (a) { html += filaArt(a, true); });
+    }
     html += '</tbody></table></div></div>';
     return html;
   }
@@ -338,11 +354,18 @@
   }
   function aplicarFiltroStocks() {
     var q = (ui.busqueda || '').toLowerCase();
+    var discVisibles = 0;
     $$('[data-art]').forEach(function (tr) {
       var okq = !q || tr.getAttribute('data-search').indexOf(q) >= 0;
       var okf = ui.filtro === 'todos' || tr.getAttribute('data-clase') === ui.filtro;
-      tr.style.display = (okq && okf) ? '' : 'none';
+      var show = okq && okf;
+      tr.style.display = show ? '' : 'none';
+      if (show && tr.getAttribute('data-clase') === 'discontinuo') discVisibles++;
     });
+    // Los discontinuos solo se ven con el filtro "Todos"; el separador aparece solo
+    // si hay alguno visible.
+    var sep = document.querySelector('.row-sep');
+    if (sep) sep.style.display = discVisibles > 0 ? '' : 'none';
   }
   afterRender.stocks = function () {
     var inp = $('#buscar');
