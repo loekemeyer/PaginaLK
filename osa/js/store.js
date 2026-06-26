@@ -50,10 +50,14 @@
         periodoMeses: 17,       // meses que abarca el total de ventas conocidas (base del promedio mensual)
         mesesPedidoDefault: 2,  // meses de cobertura deseados por defecto
         unidadVista: 'cajas',   // unidad para MOSTRAR cantidades: 'cajas' | 'unidades' (solo display)
-        sucursalLK: 'Zuviria 5352- Villa Lugano' // sucursal de entrega default del pedido
+        sucursalLK: 'Zuviria 5352- Villa Lugano', // sucursal de entrega default del pedido
+        recordatorioPedido: true // ofrecer enviar el pedido (último hábil del mes y ~día 15)
       },
       articulos: [],  // {id,codigo,nombre,descripcion,foto,precio,stockInicial,totalHistorico,uxc,stockMaximo,promedioManual,mesesPedido,activo}
-      movimientos: [] // {id,dbId,tipo,articuloId,cantidad,fecha,nota,quincena}
+      movimientos: [], // {id,dbId,tipo,articuloId,cantidad,fecha,nota,quincena}
+      feriados: {},            // set ISO->true de feriados AR (para calcular "día hábil")
+      ultimoPedidoFecha: null, // ISO del último pedido del cliente (cualquier canal)
+      authUid: null            // auth.uid() de la sesión, para consultar orders
     };
   }
   var state = blank();
@@ -137,6 +141,7 @@
       id: 1, empresa: m.empresa, cliente: m.cliente, moneda: m.moneda,
       periodo_meses: m.periodoMeses, meses_pedido_default: m.mesesPedidoDefault,
       unidad_vista: m.unidadVista, sucursal_lk: m.sucursalLK,
+      recordatorio_pedido: m.recordatorioPedido !== false,
       updated_at: new Date().toISOString()
     };
   }
@@ -920,6 +925,7 @@
     if (!sb) throw new Error('supabase-js no cargado');
     var sess = (await sb.auth.getSession()).data.session;
     if (!sess) throw new Error('no-session');
+    state.authUid = (sess.user && sess.user.id) || null;
     await loadAll();
     return true;
   }
@@ -927,6 +933,8 @@
     await loadConfig();
     await loadArticulos();
     await loadMovimientos();
+    await loadFeriados();
+    await loadUltimoPedido();
   }
   async function loadConfig() {
     var r = await sb.from(T.cfg).select('*').eq('id', 1).maybeSingle();
@@ -937,7 +945,8 @@
       moneda: c.moneda || 'ARS', periodoMeses: c.periodo_meses || 17,
       mesesPedidoDefault: c.meses_pedido_default || 2,
       unidadVista: c.unidad_vista === 'unidades' ? 'unidades' : 'cajas',
-      sucursalLK: c.sucursal_lk || 'Zuviria 5352- Villa Lugano'
+      sucursalLK: c.sucursal_lk || 'Zuviria 5352- Villa Lugano',
+      recordatorioPedido: c.recordatorio_pedido !== false
     };
   }
   async function loadArticulos() {
@@ -957,6 +966,31 @@
       .concat((res[1].data || []).map(entregaRowToMov))
       .concat((res[2].data || []).map(ajusteRowToMov));
   }
+  // Feriados nacionales AR (tabla compartida feriados_ar) → set ISO->true.
+  async function loadFeriados() {
+    try {
+      var r = await sb.from('feriados_ar').select('fecha');
+      var set = {};
+      (r.data || []).forEach(function (x) { if (x && x.fecha) set[String(x.fecha).slice(0, 10)] = true; });
+      state.feriados = set;
+    } catch (e) { state.feriados = {}; }
+  }
+  function esFeriado(iso) { return !!(state.feriados && state.feriados[iso]); }
+  // Fecha (ISO) del último pedido del cliente en `orders` (cualquier canal: formato
+  // o catálogo mayorista). Sirve para no repetir el recordatorio si ya pidió.
+  async function loadUltimoPedido() {
+    state.ultimoPedidoFecha = null;
+    if (!state.authUid) return;
+    try {
+      var r = await sb.from('orders').select('created_at')
+        .eq('auth_user_id', state.authUid)
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (r.data && r.data.created_at) state.ultimoPedidoFecha = String(r.data.created_at).slice(0, 10);
+    } catch (e) { state.ultimoPedidoFecha = null; }
+  }
+  function getUltimoPedidoFecha() { return state.ultimoPedidoFecha; }
+  // Marca "recién pedido" en memoria tras enviar, para suprimir el recordatorio al toque.
+  function marcarPedidoEnviado(iso) { state.ultimoPedidoFecha = iso || hoyISO(); }
 
   /* ---------- API pública ---------- */
   window.Store = {
@@ -973,6 +1007,7 @@
     parseReporteVentas: parseReporteVentas, parseEntregas: parseEntregas,
     quincenaDe: quincenaDe, listaQuincenas: listaQuincenas,
     cargasVentas: cargasVentas, quincenaCargada: quincenaCargada,
+    esFeriado: esFeriado, getUltimoPedidoFecha: getUltimoPedidoFecha, marcarPedidoEnviado: marcarPedidoEnviado,
     estado: estado, sugerido: sugerido, necesitaPedido: necesitaPedido, pedidoSugerido: pedidoSugerido,
     promedioMensual: promedioMensual, promedioMensualAuto: promedioMensualAuto,
     mesesPedido: mesesPedido, puntoPedido: puntoPedido,

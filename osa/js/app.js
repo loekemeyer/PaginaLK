@@ -41,7 +41,8 @@
     qPunto: '',     // buscador de Punto de pedido
     expanded: {},   // artículos expandidos en Movimientos
     movDesde: '',   // filtro de período (detalle de Movimientos)
-    movHasta: ''
+    movHasta: '',
+    recordatorioOculto: false // "Ahora no" en el aviso de día de pedido (solo esta sesión)
   };
   var pendingExpand = null; // artículo a expandir al entrar a Movimientos
 
@@ -85,6 +86,74 @@
   // Objeto/etiqueta de una quincena a partir de su clave 'AAAA-MM-Q1'/'Q2'.
   function qObj(key) { return key ? S.quincenaDe(key.slice(0, 8) + (key.slice(-1) === '1' ? '01' : '16')) : null; }
   function qLabel(key) { var q = qObj(key); return q ? q.label : (key || '—'); }
+
+  /* ---------- Día de pedido: último hábil del mes + hábil más cercano al 15 ---------- */
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function isoDe(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+  function hoyDate() { var p = S.hoyISO().split('-'); return new Date(+p[0], (+p[1]) - 1, +p[2]); }
+  function esDiaHabil(d) {
+    var dow = d.getDay();
+    if (dow === 0 || dow === 6) return false;          // domingo / sábado
+    return !S.esFeriado(isoDe(d));                      // ni feriado AR
+  }
+  function ultimoDiaHabilMes(y, m) {                    // m: 0-11
+    var d = new Date(y, m + 1, 0), g = 0;               // último día del mes
+    while (!esDiaHabil(d) && g++ < 15) d.setDate(d.getDate() - 1);
+    return d;
+  }
+  function diaHabilCercano15(y, m) {
+    var base = new Date(y, m, 15);
+    if (esDiaHabil(base)) return base;
+    for (var i = 1; i <= 7; i++) {
+      var antes = new Date(y, m, 15 - i);
+      if (antes.getMonth() === m && esDiaHabil(antes)) return antes; // empate → el anterior
+      var desp = new Date(y, m, 15 + i);
+      if (desp.getMonth() === m && esDiaHabil(desp)) return desp;
+    }
+    return base;
+  }
+  function diaDePedidoHoy() {
+    var hoy = hoyDate(), y = hoy.getFullYear(), m = hoy.getMonth(), hIso = isoDe(hoy);
+    if (isoDe(ultimoDiaHabilMes(y, m)) === hIso) return { hit: true, tipo: 'finmes' };
+    if (isoDe(diaHabilCercano15(y, m)) === hIso) return { hit: true, tipo: 'quincena' };
+    return { hit: false };
+  }
+  // Quincenas vencidas cuyas ventas todavía no se cargaron (para no pedir con datos incompletos).
+  function quincenasPendientes() {
+    var cargas = S.cargasVentas();
+    var keys = Object.keys(cargas).sort();
+    var primera = keys.length ? qObj(keys[0]) : S.quincenaDe('2026-06-16');
+    var desdeISO = (primera && primera.desde) || '2026-06-16';
+    return S.listaQuincenas(desdeISO, S.hoyISO()).filter(function (q) { return !cargas[q.key]; });
+  }
+  // Aviso de "día de pedido": OFRECE enviar el pedido (el cliente confirma).
+  function bannerRecordatorio() {
+    var meta = S.getMeta();
+    if (meta.recordatorioPedido === false || ui.recordatorioOculto) return '';
+    if (!diaDePedidoHoy().hit) return '';
+    // 1) No sugerir con ventas incompletas: avisar que falta cargar.
+    var pend = quincenasPendientes();
+    if (pend.length) {
+      var lbls = pend.map(function (q) { return qLabel(q.key); }).join(', ');
+      return '<div class="callout" style="border-left:4px solid #d97706;background:#fff7ed;">' +
+        '<svg viewBox="0 0 24 24"><path d="M12 2 1 21h22L12 2zm0 5 7.5 13h-15L12 7zm-1 4v4h2v-4h-2zm0 6v2h2v-2h-2z"/></svg>' +
+        '<div><strong>Es día de pedido</strong>, pero faltan cargar las ventas de <strong>' + esc(lbls) +
+        '</strong>. Cargalas primero para no pedir de menos. ' +
+        btn('ir-cargas', 'primary btn--sm', iconCalendar(), 'Ir a Cargas') + '</div></div>';
+    }
+    // 2) ¿Ya pidió en esta quincena? (cualquier pedido del cliente) → no molestar.
+    var q = S.quincenaDe(S.hoyISO());
+    var ult = S.getUltimoPedidoFecha();
+    if (ult && q && ult >= q.desde) return '';
+    // 3) ¿Hay algo para reponer?
+    var sug = S.pedidoSugerido();
+    if (!sug.length) return '';
+    return '<div class="callout" style="border-left:4px solid var(--primary,#b00020);background:#fbe9ec;">' +
+      '<svg viewBox="0 0 24 24"><path d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM6.2 4l.94 2H20a1 1 0 0 1 .96 1.27l-2.4 8.3A2 2 0 0 1 16.64 17H8.53a2 2 0 0 1-1.94-1.5L4.27 6.5 3.6 4H6.2z"/></svg>' +
+      '<div><strong>Hoy es día de pedido.</strong> Hay <strong>' + sug.length + '</strong> artículo(s) para reponer. ' +
+      btn('recordatorio-enviar', 'primary btn--sm', iconSend(), 'Enviar pedido a Loekemeyer') + ' ' +
+      btn('recordatorio-ocultar', 'ghost btn--sm', '', 'Ahora no') + '</div></div>';
+  }
   function fmtMoney(n) {
     var m = S.getMeta().moneda || 'ARS';
     try { return new Intl.NumberFormat('es-AR', { style: 'currency', currency: m, maximumFractionDigits: 0 }).format(n || 0); }
@@ -293,7 +362,8 @@
     var uCap = unidadVista() === 'unidades' ? 'Unidades' : 'Cajas';
     var sucActual = S.getMeta().sucursalLK || LK_SUCURSALES[0].val;
 
-    var html = '<div class="sucbar"><span class="sucbar__lbl">Sucursal de entrega</span><div class="sucbar__btns">' +
+    var html = bannerRecordatorio();
+    html += '<div class="sucbar"><span class="sucbar__lbl">Sucursal de entrega</span><div class="sucbar__btns">' +
       LK_SUCURSALES.map(function (s) {
         return '<button type="button" class="sucbtn' + (sucActual === s.val ? ' is-active' : '') +
           '" data-action="set-sucursal" data-suc="' + esc(s.val) + '">' + esc(s.lbl) + '</button>';
@@ -1240,6 +1310,8 @@
       osaSendEntregasSheet(sess.access_token, entregasPayload);
 
       toast('Pedido N° ' + orderId + ' enviado (' + rpcItems.length + ' artículos)', 'ok');
+      if (S.marcarPedidoEnviado) S.marcarPedidoEnviado(S.hoyISO()); // suprime el recordatorio de esta quincena
+      if (ui.view === 'stocks') render();
       if (noMap.length) {
         setTimeout(function () {
           toast(noMap.length + ' código(s) sin producto, no enviados: ' + noMap.join(', '), 'warn');
@@ -1355,6 +1427,13 @@
       '<div class="hint">El botón <strong>«Enviar a Loekemeyer»</strong> (en Stocks) crea un <strong>pedido normal</strong> en el sistema de Loekemeyer (igual que el catálogo mayorista): queda en tus pedidos y se envía a las planillas de Pedidos y de Entregas. La forma de pago es <strong>Contado (-25%)</strong> y la <strong>sucursal de entrega</strong> se elige arriba, en la pantalla de Stocks. Para enviar tenés que estar logueado en la página principal como OSA.</div>' +
       '</div></div>';
 
+    html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>Recordatorio de pedido</h2></div><div class="card__body">' +
+      '<label style="display:flex;align-items:center;gap:10px;cursor:pointer;">' +
+      '<input type="checkbox" id="cRecordatorio"' + (m.recordatorioPedido !== false ? ' checked' : '') + '>' +
+      '<span>Ofrecer enviar el pedido el <strong>último día hábil del mes</strong> y el <strong>día hábil más cercano al 15</strong>.</span></label>' +
+      '<div class="hint" style="margin-top:8px;">El aviso aparece en Stocks con un botón para enviar (vos confirmás, nunca se manda solo). No aparece si ya pediste en esa quincena, y avisa si faltan cargar ventas para no pedir mal.</div>' +
+      '</div></div>';
+
     html += '<div class="card" style="margin-top:18px;"><div class="card__head"><h2>¿Cómo funciona?</h2></div><div class="card__body">' +
       '<ol style="margin:0;padding-left:20px;line-height:1.9;color:var(--muted);">' +
       '<li><strong style="color:var(--text)">Stocks</strong>: ves el stock de hoy, el máximo y el pedido sugerido de cada artículo.</li>' +
@@ -1372,6 +1451,11 @@
       var meses = Math.max(1, Math.round(parseFloat($('#cPeriodo').value) || 17));
       S.setMeta({ empresa: $('#cEmpresa').value, cliente: $('#cCliente').value, moneda: $('#cMoneda').value, periodoMeses: meses });
       toast('Configuración guardada', 'ok'); updateBrand(); render();
+    });
+    var chkRec = $('#cRecordatorio');
+    if (chkRec) chkRec.addEventListener('change', function () {
+      S.setMeta({ recordatorioPedido: chkRec.checked });
+      toast(chkRec.checked ? 'Recordatorio activado' : 'Recordatorio desactivado', 'ok');
     });
     bindAction('export', exportar);
     bindAction('import', function () { $('#importFile').click(); });
@@ -1459,6 +1543,8 @@
     else if (act === 'importar-ventas') openImportVentas(t.getAttribute('data-quincena') || null);
     else if (act === 'importar-entregas') openImportEntregas();
     else if (act === 'ir-cargas') setView('cargas');
+    else if (act === 'recordatorio-enviar') enviarLoeke();
+    else if (act === 'recordatorio-ocultar') { ui.recordatorioOculto = true; render(); }
     else if (act === 'toggle-unit') {
       S.setUnidadVista(unidadVista() === 'unidades' ? 'cajas' : 'unidades');
       render();
