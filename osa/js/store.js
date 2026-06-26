@@ -15,10 +15,10 @@
   var PREFIX = CFG.prefix || 'osa';                 // prefijo de tablas: osa_* / tyl_* / …
   var COD_CLIENTE = CFG.codCliente || 2533;         // cod_cliente del cliente
   var SEED_INICIAL = CFG.seedInicial !== false;     // true: stock+ranking del seed; false: 0 (TyL)
-  // Nombres de tabla por cliente.
+  // Tablas unificadas multi-tenant: una sola por tipo, filtradas/selladas por cod_cliente.
   var T = {
-    art: PREFIX + '_articulos', ven: PREFIX + '_ventas', ent: PREFIX + '_entregas',
-    aju: PREFIX + '_ajustes', cfg: PREFIX + '_config'
+    art: 'pa_articulos', ven: 'pa_ventas', ent: 'pa_entregas',
+    aju: 'pa_ajustes', cfg: 'pa_config'
   };
   // Cliente supabase-js: misma URL/anon key/storage que el sitio → reusa la sesión
   // del cliente logueado en la página principal (misma origin).
@@ -138,7 +138,7 @@
   function metaToRow() {
     var m = state.meta;
     return {
-      id: 1, empresa: m.empresa, cliente: m.cliente, moneda: m.moneda,
+      cod_cliente: COD_CLIENTE, empresa: m.empresa, cliente: m.cliente, moneda: m.moneda,
       periodo_meses: m.periodoMeses, meses_pedido_default: m.mesesPedidoDefault,
       unidad_vista: m.unidadVista, sucursal_lk: m.sucursalLK,
       recordatorio_pedido: m.recordatorioPedido !== false,
@@ -147,7 +147,7 @@
   }
   function setMeta(patch) {
     state.meta = Object.assign(state.meta, patch);
-    if (sb) fire(sb.from(T.cfg).upsert(metaToRow(), { onConflict: 'id' }));
+    if (sb) fire(sb.from(T.cfg).upsert(metaToRow(), { onConflict: 'cod_cliente' }));
   }
 
   /* ---------- Unidades de visualización (cajas / unidades) ---------- */
@@ -156,7 +156,7 @@
   function getUnidadVista() { return state.meta.unidadVista === 'unidades' ? 'unidades' : 'cajas'; }
   function setUnidadVista(v) {
     state.meta.unidadVista = (v === 'unidades') ? 'unidades' : 'cajas';
-    if (sb) fire(sb.from(T.cfg).upsert(metaToRow(), { onConflict: 'id' }));
+    if (sb) fire(sb.from(T.cfg).upsert(metaToRow(), { onConflict: 'cod_cliente' }));
     return state.meta.unidadVista;
   }
   // Unidades por caja de un artículo (id u objeto). 1 si no se conoce.
@@ -178,7 +178,7 @@
       var a = matchCodigo(code, idx), u = Math.round(map[code]);
       if (a && u > 0 && a.uxc !== u) {
         a.uxc = u; n++;
-        if (sb) fire(sb.from(T.art).update({ uxc: u, updated_at: new Date().toISOString() }).eq('id', a.id));
+        if (sb) fire(sb.from(T.art).update({ uxc: u, updated_at: new Date().toISOString() }).eq('id', a.id).eq('cod_cliente', COD_CLIENTE));
       }
     });
     return n;
@@ -233,14 +233,14 @@
     if (data.promedioManual !== undefined) a.promedioManual = optNum(data.promedioManual);
     if (data.mesesPedido !== undefined) a.mesesPedido = optNum(data.mesesPedido);
     if (data.activo !== undefined) a.activo = !!data.activo;
-    if (sb) fire(sb.from(T.art).update(artToRow(a)).eq('id', a.id));
+    if (sb) fire(sb.from(T.art).update(artToRow(a)).eq('id', a.id).eq('cod_cliente', COD_CLIENTE));
     return a;
   }
   function removeArticulo(id) {
     state.articulos = state.articulos.filter(function (a) { return a.id !== id; });
     state.movimientos = state.movimientos.filter(function (m) { return m.articuloId !== id; });
     // El FK on delete cascade borra las filas de ventas/entregas/ajustes del artículo.
-    if (sb) fire(sb.from(T.art).delete().eq('id', id));
+    if (sb) fire(sb.from(T.art).delete().eq('id', id).eq('cod_cliente', COD_CLIENTE));
   }
 
   /* ---------- Movimientos ---------- */
@@ -640,7 +640,7 @@
       return a;
     });
     if (state.articulos.length) {
-      await sb.from(T.art).upsert(state.articulos.map(artToRow), { onConflict: 'id' });
+      await sb.from(T.art).upsert(state.articulos.map(artToRow), { onConflict: 'cod_cliente,codigo' });
     }
     // Movimientos por tipo (movToRow resuelve codigo/uxc desde state.articulos)
     var porTipo = { venta: [], entrega: [], ajuste: [] };
@@ -654,7 +654,7 @@
     for (var t in porTipo) { if (porTipo[t].length) await sb.from(tablaDe(t)).insert(porTipo[t]); }
     // Config
     state.meta = meta;
-    await sb.from(T.cfg).upsert(metaToRow(), { onConflict: 'id' });
+    await sb.from(T.cfg).upsert(metaToRow(), { onConflict: 'cod_cliente' });
     await loadAll();
   }
   // Borra todos los datos OSA (movimientos + artículos) en Supabase.
@@ -870,7 +870,7 @@
   // surtido de compras) → no sembrar desde el CATALOGO de OSA.
   function seedArticulos() {
     if (CFG.clientSeed === false) return Promise.resolve({ data: [] });
-    return sb.from(T.art).upsert(seedRows(), { onConflict: 'id', ignoreDuplicates: true });
+    return sb.from(T.art).upsert(seedRows(), { onConflict: 'cod_cliente,codigo', ignoreDuplicates: true });
   }
   // "Cargar catálogo de ejemplo" = re-sembrar el catálogo real (no borra movimientos).
   async function loadDemo() {
@@ -937,9 +937,9 @@
     await loadUltimoPedido();
   }
   async function loadConfig() {
-    var r = await sb.from(T.cfg).select('*').eq('id', 1).maybeSingle();
+    var r = await sb.from(T.cfg).select('*').eq('cod_cliente', COD_CLIENTE).maybeSingle();
     var c = r.data;
-    if (!c) { await sb.from(T.cfg).upsert(metaToRow(), { onConflict: 'id' }); c = metaToRow(); }
+    if (!c) { await sb.from(T.cfg).upsert(metaToRow(), { onConflict: 'cod_cliente' }); c = metaToRow(); }
     state.meta = {
       empresa: c.empresa || 'Loekemeyer', cliente: c.cliente || 'Osa Distribuidora SRL',
       moneda: c.moneda || 'ARS', periodoMeses: c.periodo_meses || 17,
@@ -950,16 +950,16 @@
     };
   }
   async function loadArticulos() {
-    var r = await sb.from(T.art).select('*');
+    var r = await sb.from(T.art).select('*').eq('cod_cliente', COD_CLIENTE);
     var rows = r.data || [];
-    if (!rows.length) { await seedArticulos(); r = await sb.from(T.art).select('*'); rows = r.data || []; }
+    if (!rows.length) { await seedArticulos(); r = await sb.from(T.art).select('*').eq('cod_cliente', COD_CLIENTE); rows = r.data || []; }
     state.articulos = rows.map(rowToArt);
   }
   async function loadMovimientos() {
     var res = await Promise.all([
-      sb.from(T.ven).select('id,articulo_id,unidades,fecha,nota,quincena'),
-      sb.from(T.ent).select('id,articulo_id,unidades,fecha,nota'),
-      sb.from(T.aju).select('id,articulo_id,cantidad,fecha,nota')
+      sb.from(T.ven).select('id,articulo_id,unidades,fecha,nota,quincena').eq('cod_cliente', COD_CLIENTE),
+      sb.from(T.ent).select('id,articulo_id,unidades,fecha,nota').eq('cod_cliente', COD_CLIENTE),
+      sb.from(T.aju).select('id,articulo_id,cantidad,fecha,nota').eq('cod_cliente', COD_CLIENTE)
     ]);
     state.movimientos = []
       .concat((res[0].data || []).map(ventaRowToMov))
