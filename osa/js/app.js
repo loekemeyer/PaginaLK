@@ -239,7 +239,9 @@
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
 
   /* ---------- Navegación ---------- */
+  var hasSession = false; // candado de vistas: sin sesión válida no se entra a ninguna
   function setView(v) {
+    if (!hasSession) { pantallaLogin(); return; } // sin sesión → siempre login, cualquier ruta
     if (!VIEWS[v]) v = 'stocks';
     ui.view = v;
     $$('.nav__item').forEach(function (el) {
@@ -1558,12 +1560,18 @@
   function pantalla(titulo, msg, btnHtml) {
     $('#viewTitle').textContent = titulo;
     $('#viewSubtitle').textContent = '';
+    var _ta = $('#topbarActions'); if (_ta) _ta.innerHTML = ''; // limpiar botones de acción
     viewEl.innerHTML =
       '<div class="card"><div class="card__body"><div class="empty">' +
       '<div class="empty__ic">' + iconBox() + '</div>' +
       '<h3>' + esc(titulo) + '</h3><p>' + esc(msg) + '</p>' +
       (btnHtml ? '<div class="row" style="justify-content:center;">' + btnHtml + '</div>' : '') +
       '</div></div></div>';
+  }
+  function pantallaLogin() {
+    pantalla('Iniciá sesión',
+      'El Formato OSA trabaja con tu cuenta de Loekemeyer. Ingresá en la página principal y volvé a entrar.',
+      '<a class="btn btn--primary" href="../mayorista.html">Ir a iniciar sesión</a>');
   }
 
   async function init() {
@@ -1583,9 +1591,7 @@
       await S.init(); // hidrata el estado (requiere sesión OSA); carga en silencio
     } catch (e) {
       if (e && e.message === 'no-session') {
-        pantalla('Iniciá sesión',
-          'El Formato OSA trabaja con tu cuenta de Loekemeyer. Ingresá en la página principal y volvé a entrar.',
-          '<a class="btn btn--primary" href="../mayorista.html">Ir a iniciar sesión</a>');
+        pantallaLogin();
       } else {
         pantalla('No se pudo cargar',
           'Hubo un problema trayendo los datos: ' + ((e && e.message) || e) + '. Reintentá recargando.',
@@ -1593,6 +1599,7 @@
       }
       return;
     }
+    hasSession = true;
     updateBrand();
     var v = (location.hash || '').replace('#/', '');
     setView(v || 'stocks');
