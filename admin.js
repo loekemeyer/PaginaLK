@@ -6910,6 +6910,61 @@ async function cargarEstadisticaMadre(forceReload) {
       if (c) excludedSet[c] = true;
     });
 
+    // 1.d) CAMINO RÁPIDO: caché materializada (proyección + agregado mensual
+    //      precomputados server-side por cron — ver sql/estadistica_madre_cache.sql).
+    //      Si el RPC existe y trae filas, salteamos TODA la descarga por-cliente y
+    //      el cálculo de proyección en JS (que es lo que hace lento el módulo).
+    //      La proyección viene de fn_proyeccion_madre (misma lógica, una sola fuente
+    //      de verdad). Si el RPC no existe / está vacío, caemos al cascade de abajo
+    //      sin cambiar nada del comportamiento actual.
+    try {
+      if (status) status.textContent = "Cargando caché de estadística…";
+      var cacheResp = await sb.rpc("get_estadistica_madre_cache");
+      if (!cacheResp.error && Array.isArray(cacheResp.data) && cacheResp.data.length > 0) {
+        var cByCod = {};
+        var cProj = {};
+        var cYms = {};
+        var cCalcAt = null;
+        cacheResp.data.forEach(function (r) {
+          var k = String(r.cod || "").trim().toUpperCase();
+          if (!k) return;
+          var prod = productByCod[k];
+          var meses = r.meses || {}; // jsonb { "2025-01": unidades, ... }
+          var byYm = {};
+          var total = 0;
+          Object.keys(meses).forEach(function (ym) {
+            if (!/^\d{4}-\d{2}$/.test(ym)) return;
+            var u = Number(meses[ym]) || 0;
+            byYm[ym] = u;
+            total += u;
+            cYms[ym] = true;
+          });
+          cByCod[k] = {
+            cod: prod ? prod.cod : (r.cod || k),
+            desc: prod ? prod.desc : (r.descripcion || k),
+            familia: prod ? prod.familia : (r.familia || "—"),
+            totalUnits: total,
+            byYm: byYm,
+          };
+          cProj[k] = Number(r.proy_uni_mes) || 0;
+          if (!cCalcAt && r.calculado_at) cCalcAt = r.calculado_at;
+        });
+        if (Object.keys(cByCod).length > 0) {
+          _estMadreFullByCod = cByCod;
+          _estMadreFullYms = Object.keys(cYms).sort(); // asc
+          _estMadreFullProjByItem = cProj;
+          _estMadreSource = "caché materializada";
+          _estMadreSourceHasCustomer = true;
+          _estMadreLoadedAt = cCalcAt ? new Date(cCalcAt) : new Date();
+          console.log("[estMadre] caché materializada:", Object.keys(cByCod).length, "artículos");
+          aplicarRangoEstadisticaMadre();
+          return; // listo — no bajamos por-cliente ni recalculamos en JS
+        }
+      }
+    } catch (cacheErr) {
+      console.warn("[estMadre] caché no disponible, uso cascade en vivo:", cacheErr.message);
+    }
+
     // 2) Cargar TODAS las fuentes en cascada — primer éxito gana.
     // Orden: customer-aware primero (necesario para proyección por cliente).
     // Si solo responde una fuente customer-blind, la proyección degrada a la fórmula vieja.
