@@ -2946,17 +2946,23 @@
         }),
       };
 
-      // Si tenemos orden real (no sintetico) actualizar la tabla orders
+      // Si tenemos orden real (no sintetico) actualizar la tabla orders.
+      // placed_by_auth_user_id solo existe en la tabla orders de LK: para
+      // Chef (dbClient distinto) no se manda, esa DB no tiene la columna.
       var isSyntheticOrder =
         typeof orderId === "string" && /^CHEF-/.test(orderId);
       if (!isSyntheticOrder) {
+        var orderUpdatePayload = {
+          sheets_payload: sheetsPayload,
+          is_promo: false,
+          extra_discount: 0,
+        };
+        if (!isChef) {
+          orderUpdatePayload.placed_by_auth_user_id = authUserId;
+        }
         dbClient
           .from("orders")
-          .update({
-            sheets_payload: sheetsPayload,
-            is_promo: false,
-            extra_discount: 0,
-          })
+          .update(orderUpdatePayload)
           .eq("id", orderId)
           .then(function () {});
       }

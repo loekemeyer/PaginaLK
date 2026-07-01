@@ -1256,7 +1256,12 @@
 
         window.sb
           .from("orders")
-          .update({ sheets_payload: sheetsPayload, is_promo: false, extra_discount: 0 })
+          .update({
+            sheets_payload: sheetsPayload,
+            is_promo: false,
+            extra_discount: 0,
+            placed_by_auth_user_id: session.user.id,
+          })
           .eq("id", orderId)
           .then(function () {});
 

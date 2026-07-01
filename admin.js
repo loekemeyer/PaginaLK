@@ -5107,12 +5107,14 @@ async function cpCardDoSubmit(card) {
       }),
     };
 
-    // Guardar payload para retry + marcar origen
+    // Guardar payload para retry + marcar origen (admin cargando desde el
+    // Cotizador → placed_by_auth_user_id queda como "admin" en v_orders_origen)
     sb.from("orders")
       .update({
         sheets_payload: sheetsPayload,
         is_promo: false,
         extra_discount: 0,
+        placed_by_auth_user_id: session.user.id,
       })
       .eq("id", orderId)
       .then(function () {});

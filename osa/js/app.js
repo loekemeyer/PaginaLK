@@ -1289,7 +1289,7 @@
         items: sheetItems.map(function (it) { return { cod_art: it.cod_art, cajas: it.cajas, uxb: it.uxb }; })
       };
 
-      sb.from('orders').update({ sheets_payload: sheetsPayload, is_promo: false, extra_discount: 0 })
+      sb.from('orders').update({ sheets_payload: sheetsPayload, is_promo: false, extra_discount: 0, placed_by_auth_user_id: authUserId })
         .eq('id', orderId).then(function () {});
       osaSendSheets(sess.access_token, sheetsPayload)
         .then(function () { sb.from('orders').update({ sheets_sent: true }).eq('id', orderId).then(function () {}); })
