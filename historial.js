@@ -601,6 +601,25 @@ window.hInc = function (cod) {
   el.value = Math.max(0, (parseInt(el.value, 10) || 0) + 1);
 };
 
+// Registra en background el click de "Volver a pedir" desde Historial
+// (misma tabla que usa mayorista.html para medir uso por módulo). Acá solo
+// tenemos el código de producto (no el id), se guarda en product_cod.
+function logCartAddEventHist(cod) {
+  sb.auth
+    .getSession()
+    .then(({ data }) => {
+      const session = data && data.session;
+      if (!session) return;
+      return sb.from("cart_add_events").insert({
+        customer_id: null,
+        auth_user_id: session.user.id,
+        product_cod: cod,
+        source: "historial",
+      });
+    })
+    .catch(() => {});
+}
+
 window.hAdd = function (cod) {
   const code = String(cod).trim();
 
@@ -619,6 +638,7 @@ window.hAdd = function (cod) {
   else list.push({ cod: code, qty });
 
   writePendingAdds(list);
+  logCartAddEventHist(code);
 
   const btn = document.getElementById(`hadd-${code}`);
   if (btn) {

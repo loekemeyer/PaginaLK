@@ -344,6 +344,22 @@
                 </span>
                 <span>Origen de Pedidos</span>
               </button>
+              <button class="nav-item" data-page="uso-modulos">
+                <span class="nav-icon">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                  >
+                    <path d="M3 3v18h18" />
+                    <rect x="7" y="12" width="3" height="6" />
+                    <rect x="12" y="8" width="3" height="10" />
+                    <rect x="17" y="5" width="3" height="13" />
+                  </svg>
+                </span>
+                <span>Uso de Módulos</span>
+              </button>
             </div>
           </div>
 
@@ -1317,6 +1333,83 @@
           </div>
 
           <div id="origenPedidosStatus" style="color: var(--text3); font-size: 13px;"></div>
+        </section>
+
+        <!-- PAGE: USO DE MÓDULOS (Novedades, Sugerencias, Historial, etc) -->
+        <section class="page" id="uso-modulos">
+          <div class="page-header">
+            <div>
+              <h1>Uso de Módulos</h1>
+              <p class="page-sub">
+                Desde qué módulo se agregan productos: Novedades, "no te
+                falta esto de tu surtido", popup de upsell, línea Loke,
+                Sugerir productos (vendedor), página de Sugerencias, e
+                Historial. Solo cuenta desde que se activó este tracking.
+              </p>
+            </div>
+            <button class="btn-ghost" id="usoModulosRefreshBtn">
+              Actualizar
+            </button>
+          </div>
+
+          <div
+            style="
+              display: flex;
+              align-items: flex-end;
+              gap: 12px;
+              margin-bottom: 16px;
+              flex-wrap: wrap;
+            "
+          >
+            <div>
+              <label class="field-label" for="usoModulosDesde">Desde</label>
+              <input type="date" class="field-input" id="usoModulosDesde" />
+            </div>
+            <div>
+              <label class="field-label" for="usoModulosHasta">Hasta</label>
+              <input type="date" class="field-input" id="usoModulosHasta" />
+            </div>
+            <button class="btn-ghost" id="usoModulosLimpiarBtn">
+              Limpiar filtro
+            </button>
+          </div>
+
+          <h3 class="section-title">Novedades: vistas vs. agregados</h3>
+          <div
+            style="
+              display: grid;
+              grid-template-columns: repeat(3, 1fr);
+              gap: 12px;
+              margin-bottom: 20px;
+            "
+          >
+            <div class="stat-box stat-neutral">
+              <div class="stat-num" id="usoModulosNovVistas">–</div>
+              <div class="stat-label">Vistas del carrusel</div>
+            </div>
+            <div class="stat-box stat-ok">
+              <div class="stat-num" id="usoModulosNovAgregados">–</div>
+              <div class="stat-label">Agregados desde Novedades</div>
+            </div>
+            <div class="stat-box stat-neutral">
+              <div class="stat-num" id="usoModulosNovConversion">–</div>
+              <div class="stat-label">% Conversión vista → agregado</div>
+            </div>
+          </div>
+
+          <h3 class="section-title">Agregados y ventas por módulo</h3>
+          <table class="data-table" id="usoModulosTable">
+            <thead>
+              <tr>
+                <th>Módulo</th>
+                <th>Clics "Agregar"</th>
+                <th>Líneas en pedidos confirmados</th>
+              </tr>
+            </thead>
+            <tbody id="usoModulosTableBody"></tbody>
+          </table>
+
+          <div id="usoModulosStatus" style="color: var(--text3); font-size: 13px; margin-top: 10px;"></div>
         </section>
 
         <!-- PAGE: CONDICIONES CLIENTES (LC / PP / DEUDA) -->

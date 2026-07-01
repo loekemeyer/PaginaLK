@@ -630,6 +630,12 @@ document.querySelectorAll(".nav-item").forEach(function (btn) {
     ) {
       cargarOrigenPedidos();
     }
+    if (
+      btn.dataset.page === "uso-modulos" &&
+      typeof cargarUsoModulos === "function"
+    ) {
+      cargarUsoModulos();
+    }
   });
 });
 
@@ -655,6 +661,27 @@ if (origenPedidosLimpiarBtn) {
     if (desde) desde.value = "";
     if (hasta) hasta.value = "";
     cargarOrigenPedidos();
+  });
+}
+
+var usoModulosRefreshBtn = document.getElementById("usoModulosRefreshBtn");
+if (usoModulosRefreshBtn) {
+  usoModulosRefreshBtn.addEventListener("click", cargarUsoModulos);
+}
+
+["usoModulosDesde", "usoModulosHasta"].forEach(function (id) {
+  var el = document.getElementById(id);
+  if (el) el.addEventListener("change", cargarUsoModulos);
+});
+
+var usoModulosLimpiarBtn = document.getElementById("usoModulosLimpiarBtn");
+if (usoModulosLimpiarBtn) {
+  usoModulosLimpiarBtn.addEventListener("click", function () {
+    var desde = document.getElementById("usoModulosDesde");
+    var hasta = document.getElementById("usoModulosHasta");
+    if (desde) desde.value = "";
+    if (hasta) hasta.value = "";
+    cargarUsoModulos();
   });
 }
 
@@ -6159,6 +6186,123 @@ async function cargarOrigenPedidos() {
     if (statusEl) {
       statusEl.textContent =
         "No se pudo cargar (¿corriste add_order_source_tracking.sql en Supabase?): " +
+        (e.message || String(e));
+    }
+  }
+}
+
+/* =========================================================
+   USO DE MÓDULOS
+   - cart_add_events: clics de "agregar" por módulo (source)
+   - v_order_items_source: líneas que terminaron en pedido confirmado
+   - novedades_impressions: veces que se mostró el carrusel de Novedades
+   ========================================================= */
+var USO_MODULOS_SOURCES = [
+  { key: "catalogo", label: "Catálogo normal" },
+  { key: "novedades", label: "Novedades (carrusel)" },
+  { key: "surtido_faltante", label: '"No te falta esto de tu surtido"' },
+  { key: "upsell_popup", label: "Popup upsell (antes de confirmar)" },
+  { key: "loke", label: "Línea Loke" },
+  { key: "sugerencia_vendedor", label: "Sugerir productos (vendedor)" },
+  { key: "sugerencias", label: "Página Sugerencias (IA)" },
+  { key: "historial", label: 'Historial ("Volver a pedir")' },
+];
+
+async function cargarUsoModulos() {
+  var tbody = document.getElementById("usoModulosTableBody");
+  var statusEl = document.getElementById("usoModulosStatus");
+  if (!tbody) return;
+
+  var desdeVal = document.getElementById("usoModulosDesde")?.value || "";
+  var hastaVal = document.getElementById("usoModulosHasta")?.value || "";
+  var desdeISO = desdeVal ? desdeVal + "T00:00:00" : null;
+  var hastaISO = hastaVal ? hastaVal + "T23:59:59.999" : null;
+
+  function withRange(q) {
+    if (desdeISO) q = q.gte("created_at", desdeISO);
+    if (hastaISO) q = q.lte("created_at", hastaISO);
+    return q;
+  }
+
+  if (statusEl) statusEl.textContent = "Cargando…";
+  tbody.innerHTML = "";
+
+  try {
+    var imprPromise = withRange(
+      sb.from("novedades_impressions").select("id", { count: "exact", head: true }),
+    );
+    var clickPromises = USO_MODULOS_SOURCES.map(function (s) {
+      return withRange(
+        sb
+          .from("cart_add_events")
+          .select("id", { count: "exact", head: true })
+          .eq("source", s.key),
+      );
+    });
+    var lineasPromises = USO_MODULOS_SOURCES.map(function (s) {
+      return withRange(
+        sb
+          .from("v_order_items_source")
+          .select("order_item_id", { count: "exact", head: true })
+          .eq("source", s.key),
+      );
+    });
+
+    var all = await Promise.all(
+      [imprPromise].concat(clickPromises).concat(lineasPromises),
+    );
+
+    var imprResult = all[0];
+    if (imprResult.error) throw imprResult.error;
+    var vistas = imprResult.count || 0;
+
+    var clickResults = all.slice(1, 1 + USO_MODULOS_SOURCES.length);
+    var lineasResults = all.slice(1 + USO_MODULOS_SOURCES.length);
+
+    var rows = USO_MODULOS_SOURCES.map(function (s, i) {
+      if (clickResults[i].error) throw clickResults[i].error;
+      if (lineasResults[i].error) throw lineasResults[i].error;
+      return {
+        key: s.key,
+        label: s.label,
+        clicks: clickResults[i].count || 0,
+        lineas: lineasResults[i].count || 0,
+      };
+    });
+
+    var novRow = rows.filter(function (r) {
+      return r.key === "novedades";
+    })[0];
+    var novAgregados = novRow ? novRow.clicks : 0;
+    var conversion =
+      vistas > 0 ? ((novAgregados / vistas) * 100).toFixed(1) + "%" : "–";
+
+    document.getElementById("usoModulosNovVistas").textContent = vistas;
+    document.getElementById("usoModulosNovAgregados").textContent =
+      novAgregados;
+    document.getElementById("usoModulosNovConversion").textContent =
+      conversion;
+
+    tbody.innerHTML = rows
+      .map(function (r) {
+        return (
+          "<tr><td>" +
+          r.label +
+          "</td><td>" +
+          r.clicks +
+          "</td><td>" +
+          r.lineas +
+          "</td></tr>"
+        );
+      })
+      .join("");
+
+    if (statusEl) statusEl.textContent = "Actualizado.";
+  } catch (e) {
+    console.error("cargarUsoModulos error:", e);
+    if (statusEl) {
+      statusEl.textContent =
+        "No se pudo cargar (¿corriste add_module_usage_tracking.sql en Supabase?): " +
         (e.message || String(e));
     }
   }

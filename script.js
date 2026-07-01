@@ -1564,7 +1564,7 @@ async function editOrder(orderId) {
   try {
     const { data, error } = await supabaseClient
       .from("order_items")
-      .select("product_id, cajas")
+      .select("product_id, cajas, source")
       .eq("order_id", orderId);
 
     if (error) throw error;
@@ -1580,6 +1580,7 @@ async function editOrder(orderId) {
       cart.push({
         productId: it.product_id,
         qtyCajas: Math.max(1, Math.round(cajas)),
+        source: it.source || "catalogo",
       });
     });
 
@@ -1672,7 +1673,9 @@ async function repeatOrder(orderId) {
       cart.push({
         productId: it.product_id,
         qtyCajas: Math.max(1, Math.round(cajas)),
+        source: "historial",
       });
+      logCartAddEvent(it.product_id, "historial");
     });
 
     // Refrescar UI
@@ -2891,7 +2894,8 @@ async function vendorSuggestAddToCart(productId, qty, customerId, btnEl) {
     if (existing) {
       existing.qtyCajas = (Number(existing.qtyCajas) || 0) + qty;
     } else {
-      cart.push({ productId: productId, qtyCajas: qty });
+      cart.push({ productId: productId, qtyCajas: qty, source: "sugerencia_vendedor" });
+      logCartAddEvent(productId, "sugerencia_vendedor");
     }
 
     if (typeof updateCart === "function") updateCart();
@@ -3342,7 +3346,7 @@ function renderProducts() {
       `
               : qty <= 0
                 ? `
-          <button class="add-btn ${vendorBrowse ? "add-vendor-browse" : ""}" id="add-${pid}" onclick="${vendorBrowse ? "scrollToCustomerSelector()" : "addFirstBox('" + pid + "')"}" title="${vendorBrowse ? "Elegí primero una razón social" : ""}">
+          <button class="add-btn ${vendorBrowse ? "add-vendor-browse" : ""}" id="add-${pid}" onclick="${vendorBrowse ? "scrollToCustomerSelector()" : "addFirstBox('" + pid + "','catalogo')"}" title="${vendorBrowse ? "Elegí primero una razón social" : ""}">
             ${vendorBrowse ? "Elegir razón social" : "Agregar al pedido"}
           </button>
         `
@@ -3839,7 +3843,7 @@ function _ncBuildFootBlock(p, logged) {
     return `<button type="button" class="nc-add nc-login" onclick="openLogin()">Iniciar sesión</button>`;
   }
   if (qty <= 0) {
-    return `<button type="button" class="nc-add" onclick="addFirstBox('${pid}')">Agregar</button>`;
+    return `<button type="button" class="nc-add" onclick="addFirstBox('${pid}','novedades')">Agregar</button>`;
   }
   // Stepper inline compacto — misma altura que botón Agregar para no romper layout.
   // Click − en qty=1 ⇒ removeItem (lógica en changeQty).
@@ -3929,6 +3933,8 @@ function renderNewProductsCarousel() {
 
   // Carrusel visible → ocultar el botón "Mostrar"
   if (showBtn) showBtn.hidden = true;
+
+  logNovedadesImpression();
 
   // Orden estable: ranking asc → orden_catalogo asc → cod
   news.sort((a, b) => {
@@ -4872,6 +4878,7 @@ function loadCartFromLS() {
         productId: String(x.productId),
         qtyCajas: Math.max(1, parseInt(x.qtyCajas, 10) || 1),
         isUpsellPromo: !!x.isUpsellPromo,
+        source: x.source || "catalogo",
       }))
       .filter((x) => x.productId);
   } catch {
@@ -4903,6 +4910,7 @@ function saveCartToLS() {
       productId: String(x.productId),
       qtyCajas: Math.max(1, parseInt(x.qtyCajas, 10) || 1),
       isUpsellPromo: !!x.isUpsellPromo,
+      source: x.source || "catalogo",
     }));
     localStorage.setItem(CART_LS_KEY, JSON.stringify(payload));
   } catch {}
@@ -5179,6 +5187,7 @@ async function saveCart() {
       productId: String(x.productId),
       qtyCajas: Math.max(1, parseInt(x.qtyCajas, 10) || 1),
       isUpsellPromo: !!x.isUpsellPromo,
+      source: x.source || "catalogo",
     }));
 
     const basePayload = {
@@ -5474,6 +5483,7 @@ async function loadDraftIntoCart(draftId) {
         productId: pid,
         qtyCajas: qty,
         isUpsellPromo: !!it.isUpsellPromo,
+        source: it.source || "catalogo",
       });
     });
     saveCartToLS();
@@ -5570,7 +5580,49 @@ function openDraftsFromMenu() {
   }, 250);
 }
 
-function addFirstBox(productId) {
+// Registra una única vez por sesión (mientras no se recargue la página) que
+// el carrusel de Novedades se mostró con al menos un producto — permite
+// calcular tasa de conversión vistas → agregados en el panel admin.
+var _novedadesImpressionLogged = false;
+function logNovedadesImpression() {
+  if (_novedadesImpressionLogged) return;
+  _novedadesImpressionLogged = true;
+  try {
+    if (!currentSession || !supabaseClient) return;
+    supabaseClient
+      .from("novedades_impressions")
+      .insert({
+        customer_id: customerProfile?.id || null,
+        auth_user_id: currentSession.user.id,
+      })
+      .then(function () {});
+  } catch (e) {
+    // no-op
+  }
+}
+
+// Registra en background un click de "agregar", etiquetado por módulo de
+// origen (catalogo / novedades / surtido_faltante / upsell_popup / loke /
+// sugerencia_vendedor / historial). No bloquea la UI ni rompe el flujo si
+// falla (ej. la tabla todavía no existe en Supabase).
+function logCartAddEvent(productId, source) {
+  try {
+    if (!currentSession || !supabaseClient) return;
+    supabaseClient
+      .from("cart_add_events")
+      .insert({
+        customer_id: customerProfile?.id || null,
+        auth_user_id: currentSession.user.id,
+        product_id: productId,
+        source: source || "catalogo",
+      })
+      .then(function () {});
+  } catch (e) {
+    // no-op: analytics nunca debe romper el flujo de compra
+  }
+}
+
+function addFirstBox(productId, source) {
   if (!currentSession) {
     openLogin();
     return;
@@ -5611,8 +5663,9 @@ function addFirstBox(productId) {
   if (existing) {
     existing.qtyCajas += 1;
   } else {
-    cart.push({ productId, qtyCajas: 1 });
+    cart.push({ productId, qtyCajas: 1, source: source || "catalogo" });
     toggleControls(productId, true);
+    logCartAddEvent(productId, source || "catalogo");
   }
 
   // ✅ Toast: 3s después del último “agregar” (no acumulativo)
@@ -6419,7 +6472,7 @@ function missingStep(pid, delta) {
     return String(i.productId) === String(pid);
   });
   if (!inCart) {
-    if (delta > 0) addFirstBox(pid);
+    if (delta > 0) addFirstBox(pid, "surtido_faltante");
     return;
   }
   changeQty(pid, delta); // si llega a 0, removeItem se encarga
@@ -6625,7 +6678,13 @@ function showUpsellPopup(upsellProducts) {
             existing.qtyCajas += qty;
             existing.isUpsellPromo = true;
           } else {
-            cart.push({ productId: pid, qtyCajas: qty, isUpsellPromo: true });
+            cart.push({
+              productId: pid,
+              qtyCajas: qty,
+              isUpsellPromo: true,
+              source: "upsell_popup",
+            });
+            logCartAddEvent(pid, "upsell_popup");
           }
         });
         updateCart();
@@ -6706,6 +6765,7 @@ async function _submitSingleOrder(
         list_price: Number(p.list_price || 0),
         description: String(p.description || ""),
         is_loke: loke,
+        source: item.source || "catalogo",
       };
     })
     .filter(Boolean)
@@ -6866,6 +6926,17 @@ async function _submitSingleOrder(
     })
     .eq("id", orderId)
     .then(function () {});
+
+  // Marcar en order_items desde qué módulo se agregó cada línea (Novedades,
+  // Sugerencias, Historial, catálogo normal, etc). Background, no bloquea.
+  itemsPayload.forEach(function (it) {
+    supabaseClient
+      .from("order_items")
+      .update({ source: it.source || "catalogo" })
+      .eq("order_id", orderId)
+      .eq("product_id", it.product_id)
+      .then(function () {});
+  });
 
   // Enviar a sheets-proxy en background
   sendOrderToSheetsWithRetry(sheetsPayload, 3)
@@ -9699,7 +9770,13 @@ function lokeAddFirst(productId) {
   if (existing) {
     existing.qtyCajas += 1;
   } else {
-    cart.push({ productId: productId, qtyCajas: 1, isLoke: true });
+    cart.push({
+      productId: productId,
+      qtyCajas: 1,
+      isLoke: true,
+      source: "loke",
+    });
+    logCartAddEvent(productId, "loke");
   }
   updateCart();
   renderLokeProducts();
@@ -10478,7 +10555,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         );
 
         if (found) found.qtyCajas += q;
-        else cart.push({ productId: String(prod.id), qtyCajas: q });
+        else
+          cart.push({
+            productId: String(prod.id),
+            qtyCajas: q,
+            source: "historial",
+          });
       });
 
       localStorage.removeItem(HISTORY_PENDING_KEY);

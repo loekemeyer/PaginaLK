@@ -625,10 +625,29 @@ function addToCartLS(productId, qtyCajas) {
   if (found) {
     found.qtyCajas = Math.max(1, (parseInt(found.qtyCajas, 10) || 0) + q);
   } else {
-    cart.push({ productId: pid, qtyCajas: q });
+    cart.push({ productId: pid, qtyCajas: q, source: "sugerencias" });
+    logCartAddEventSug(pid);
   }
 
   writeCartLS(cart);
+}
+
+// Registra en background el click de "agregar" desde el módulo Sugerencias
+// (misma tabla que usa mayorista.html para medir uso por módulo).
+function logCartAddEventSug(productId) {
+  sb.auth
+    .getSession()
+    .then(({ data }) => {
+      const session = data && data.session;
+      if (!session) return;
+      return sb.from("cart_add_events").insert({
+        customer_id: null,
+        auth_user_id: session.user.id,
+        product_id: productId,
+        source: "sugerencias",
+      });
+    })
+    .catch(() => {});
 }
 
 // Handlers globales para onclick del HTML
