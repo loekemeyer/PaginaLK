@@ -16,7 +16,11 @@ COMMENT ON COLUMN orders.placed_by_auth_user_id IS
 
 -- 2) Vista que clasifica el origen de cada pedido comparando
 --    placed_by_auth_user_id contra el auth_user_id dueño del customer_id.
-CREATE OR REPLACE VIEW v_orders_origen AS
+--    security_invoker = true: la vista respeta el RLS de orders/customers
+--    de quien consulta (admin ve todo, cliente solo lo suyo), en vez de
+--    correr con los permisos de quien la creó.
+CREATE OR REPLACE VIEW v_orders_origen
+WITH (security_invoker = true) AS
 SELECT
   o.id AS order_id,
   o.customer_id,
@@ -34,6 +38,8 @@ SELECT
 FROM orders o
 JOIN customers c ON c.id = o.customer_id;
 
+GRANT SELECT ON v_orders_origen TO authenticated;
+
 -- 3) Para ver los conteos pedidos (cliente vs vendedor vs admin vs
 --    desconocido = pedidos viejos sin este dato):
 --
@@ -41,3 +47,6 @@ JOIN customers c ON c.id = o.customer_id;
 --   FROM v_orders_origen
 --   GROUP BY origen_pedido
 --   ORDER BY count(*) DESC;
+--
+-- Esto mismo se puede ver desde el panel admin: sidebar → Carga Pedidos →
+-- Origen de Pedidos.

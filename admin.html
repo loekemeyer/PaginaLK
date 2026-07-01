@@ -330,6 +330,20 @@
                 </span>
                 <span>Excel Fmto Cltes</span>
               </button>
+              <button class="nav-item" data-page="origen-pedidos">
+                <span class="nav-icon">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                  >
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 7v5l3 3" />
+                  </svg>
+                </span>
+                <span>Origen de Pedidos</span>
+              </button>
             </div>
           </div>
 
@@ -1235,6 +1249,52 @@
             </div>
             <div id="trackingDbList" class="tracking-db-list"></div>
           </div>
+        </section>
+
+        <!-- PAGE: ORIGEN DE PEDIDOS (cliente / vendedor / admin) -->
+        <section class="page" id="origen-pedidos">
+          <div class="page-header">
+            <div>
+              <h1>Origen de Pedidos</h1>
+              <p class="page-sub">
+                Quién cargó cada pedido: el cliente en persona, un vendedor
+                usando "Pedir para", o un admin desde el panel. Solo cuenta
+                pedidos cargados desde que se activó este tracking.
+              </p>
+            </div>
+            <button class="btn-ghost" id="origenPedidosRefreshBtn">
+              Actualizar
+            </button>
+          </div>
+
+          <div
+            id="origenPedidosStats"
+            style="
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 12px;
+              margin-bottom: 16px;
+            "
+          >
+            <div class="stat-box stat-ok">
+              <div class="stat-num" id="origenPedidosCliente">–</div>
+              <div class="stat-label">Cliente</div>
+            </div>
+            <div class="stat-box stat-neutral">
+              <div class="stat-num" id="origenPedidosVendedor">–</div>
+              <div class="stat-label">Vendedor</div>
+            </div>
+            <div class="stat-box stat-neutral">
+              <div class="stat-num" id="origenPedidosAdmin">–</div>
+              <div class="stat-label">Admin</div>
+            </div>
+            <div class="stat-box stat-warn">
+              <div class="stat-num" id="origenPedidosDesconocido">–</div>
+              <div class="stat-label">Desconocido (previos al tracking)</div>
+            </div>
+          </div>
+
+          <div id="origenPedidosStatus" style="color: var(--text3); font-size: 13px;"></div>
         </section>
 
         <!-- PAGE: CONDICIONES CLIENTES (LC / PP / DEUDA) -->

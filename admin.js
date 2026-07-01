@@ -624,8 +624,21 @@ document.querySelectorAll(".nav-item").forEach(function (btn) {
     ) {
       cargarRegistroEnvios();
     }
+    if (
+      btn.dataset.page === "origen-pedidos" &&
+      typeof cargarOrigenPedidos === "function"
+    ) {
+      cargarOrigenPedidos();
+    }
   });
 });
+
+var origenPedidosRefreshBtn = document.getElementById(
+  "origenPedidosRefreshBtn",
+);
+if (origenPedidosRefreshBtn) {
+  origenPedidosRefreshBtn.addEventListener("click", cargarOrigenPedidos);
+}
 
 // ---- GROUP TOGGLES (modulos colapsables) ----
 document.querySelectorAll(".nav-group-toggle").forEach(function (toggle) {
@@ -6085,6 +6098,48 @@ async function marcarSucursalCargada(customerId, slot) {
    - "De baja": no hace pedidos hace más de 730 días (2 años)
    ========================================================= */
 var _estCacheLoaded = false;
+async function cargarOrigenPedidos() {
+  var statusEl = document.getElementById("origenPedidosStatus");
+  var els = {
+    cliente: document.getElementById("origenPedidosCliente"),
+    vendedor: document.getElementById("origenPedidosVendedor"),
+    admin: document.getElementById("origenPedidosAdmin"),
+    desconocido: document.getElementById("origenPedidosDesconocido"),
+  };
+  if (!els.cliente) return;
+
+  if (statusEl) statusEl.textContent = "Cargando…";
+
+  try {
+    var keys = ["cliente", "vendedor", "admin", "desconocido"];
+    var counts = {};
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      var r = await sb
+        .from("v_orders_origen")
+        .select("order_id", { count: "exact", head: true })
+        .eq("origen_pedido", k);
+      if (r.error) throw r.error;
+      counts[k] = r.count || 0;
+    }
+
+    els.cliente.textContent = counts.cliente;
+    els.vendedor.textContent = counts.vendedor;
+    els.admin.textContent = counts.admin;
+    els.desconocido.textContent = counts.desconocido;
+
+    var total = counts.cliente + counts.vendedor + counts.admin + counts.desconocido;
+    if (statusEl) statusEl.textContent = "Total: " + total + " pedidos.";
+  } catch (e) {
+    console.error("cargarOrigenPedidos error:", e);
+    if (statusEl) {
+      statusEl.textContent =
+        "No se pudo cargar (¿corriste add_order_source_tracking.sql en Supabase?): " +
+        (e.message || String(e));
+    }
+  }
+}
+
 async function cargarEstadisticaClientes() {
   var statusEl = document.getElementById("estClientesStatus");
   var proxBody = document.querySelector("#estProximosTable tbody");
