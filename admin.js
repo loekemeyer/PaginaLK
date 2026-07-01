@@ -631,7 +631,14 @@ document.querySelectorAll(".nav-item").forEach(function (btn) {
 document.querySelectorAll(".nav-group-toggle").forEach(function (toggle) {
   toggle.addEventListener("click", function () {
     var group = toggle.closest(".nav-group");
-    if (group) group.classList.toggle("collapsed");
+    if (!group) return;
+    var isCollapsed = group.classList.contains("collapsed");
+    // Cerrar todos los grupos abiertos
+    document.querySelectorAll(".nav-group").forEach(function (g) {
+      g.classList.add("collapsed");
+    });
+    // Abrir el clickeado solo si estaba cerrado
+    if (isCollapsed) group.classList.remove("collapsed");
   });
 });
 
@@ -2690,6 +2697,8 @@ var CP_SHEETS_PROXY_URL =
 var CP_SHEETS_ENTREGAS_PROXY_URL =
   "https://kwkclwhmoygunqmlegrg.functions.supabase.co/sheets-entregas-proxy";
 var CP_WEB_DISCOUNT = 0.02;
+// Cliente especial con lista propia (Lista 30 - Lista GM). Sin descuentos.
+var CP_GM_COD_CLIENTE = "4080";
 
 // Mapeo columna 0-indexed (E=4 ... J=9) → discount + code + texto del metodo de pago
 var CP_PAYMENT_MAP = {
@@ -3064,6 +3073,61 @@ function cpParseItems(raw) {
       description: product ? product.description : "NO ENCONTRADO",
       uxb: product ? Number(product.uxb || 0) : 0,
       listPrice: product ? Number(product.list_price || 0) : 0,
+    });
+  }
+  return items;
+}
+
+// Detecta si el Excel es el formato de Lista GM (tiene columna de precio $ x Uni)
+function cpDetectGMFormat(raw) {
+  // El encabezado está en fila 5 (índice 4); columna G (índice 6) = "$ x Uni"
+  var headerRow = raw[4] || [];
+  var colG = String(headerRow[6] || "").trim().toLowerCase();
+  return colG.indexOf("x uni") !== -1 || colG.indexOf("$ x u") !== -1;
+}
+
+// Parser específico para cotizador Lista GM (cliente 4080 - Distribuidora GM)
+// Toma el precio directamente del Excel (col G), sin aplicar ningún descuento.
+function cpParseItemsGM(raw) {
+  var items = [];
+  // Datos desde fila 6 (índice 5) en adelante
+  for (var i = 5; i < raw.length; i++) {
+    var row = raw[i];
+    if (!row) continue;
+    var cod = String(row[3] || "").trim();
+    var cajasRaw = row[4];
+    var uxbRaw = Number(row[5]) || 0;
+    var pricePerUnit = Number(row[6]) || 0;
+    var desc = String(row[1] || "").trim();
+
+    // Requiere código, cajas > 0 y precio > 0
+    if (!cod || !cajasRaw || Number(cajasRaw) <= 0) continue;
+    if (pricePerUnit <= 0) continue;
+    var cajas = Number(cajasRaw);
+
+    // Aplicar sustituciones de códigos (igual que parser normal)
+    var codOriginal = null;
+    var sub = cpSubstituteCod(cod);
+    if (sub) {
+      codOriginal = cod;
+      cod = sub.cod;
+      cajas = cajas * (sub.factor || 1);
+    }
+
+    var product = cpFindProduct(cod);
+    var uxb = uxbRaw > 0 ? uxbRaw : (product ? Number(product.uxb || 1) : 1);
+
+    items.push({
+      cod: cod,
+      cod_original: codOriginal,
+      cajas: cajas,
+      uxb: uxb,
+      pricePerUnit: pricePerUnit,
+      product: product,
+      found: !!product,
+      description: product ? product.description : (desc || "NO ENCONTRADO"),
+      listPrice: pricePerUnit, // Para render genérico: el precio GM ES el precio de lista
+      isGMItem: true,
     });
   }
   return items;
@@ -3487,11 +3551,13 @@ async function cpCardSelectCustomer(card, c) {
   // para forzar nueva carga con el cliente correcto.
   var prevCod = card.customer ? String(card.customer.cod_cliente) : null;
   var newCod = String(c.cod_cliente || "");
-  var hadCotizador =
-    (card.parsed && card.parsed.length) || card.pendingFileData;
-  if (hadCotizador || (prevCod && prevCod !== newCod)) {
+  var changingClient = prevCod && prevCod !== newCod;
+  var savedPending = changingClient ? null : card.pendingFileData;
+  if ((card.parsed && card.parsed.length) || card.pendingFileData || changingClient) {
     cpCardClearCotizadorState(card);
   }
+  // Restaurar el archivo pendiente si no hubo cambio de cliente
+  card.pendingFileData = savedPending;
 
   card.customer = c;
   card.customerWrap.innerHTML =
@@ -3683,10 +3749,23 @@ function cpCardProcessFileData(card, buf) {
     var sheet = wb.Sheets[sheetName];
     var raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
-    var items = cpParseItems(raw);
-    var payment = cpParsePaymentFromRaw(raw);
-    var delivery = cpParseDeliveryFromRaw(raw);
-    var excelTotal = cpParseExcelTotal(raw);
+    var isGM = cpDetectGMFormat(raw);
+    card.isGM = isGM;
+
+    var items, payment, delivery, excelTotal;
+
+    if (isGM) {
+      // Formato Lista GM (cliente 4080): precios del Excel, sin descuentos
+      items = cpParseItemsGM(raw);
+      payment = { text: "Lista GM", discount: 0, code: 0 };
+      delivery = cpParseDeliveryFromRaw(raw);
+      excelTotal = null; // No comparamos con total del Excel en este formato
+    } else {
+      items = cpParseItems(raw);
+      payment = cpParsePaymentFromRaw(raw);
+      delivery = cpParseDeliveryFromRaw(raw);
+      excelTotal = cpParseExcelTotal(raw);
+    }
 
     if (!items.length) {
       cpCardSetStatus(
@@ -3700,7 +3779,7 @@ function cpCardProcessFileData(card, buf) {
       );
       return;
     }
-    if (!payment) {
+    if (!isGM && !payment) {
       cpCardSetStatus(
         card,
         "El cotizador no tiene exactamente una X marcada en fila 6 (E-J).",
@@ -3910,6 +3989,26 @@ function cpCardOpenOffer(card) {
 }
 
 function cpCardComputeTotals(card) {
+  // Lista GM: precios del Excel, sin ningún descuento
+  if (card.isGM) {
+    var subtotalGM = 0;
+    var totalCajasGM = 0;
+    card.parsed.forEach(function (it) {
+      var unidades = Number(it.cajas || 0) * Number(it.uxb || 0);
+      subtotalGM += Number(it.pricePerUnit || 0) * unidades;
+      totalCajasGM += Number(it.cajas || 0);
+    });
+    return {
+      subtotal: subtotalGM,
+      subtotalNoVol: subtotalGM,
+      listTotal: subtotalGM,
+      finalTotal: subtotalGM,
+      excelEquivTotal: subtotalGM,
+      totalDiscounts: 0,
+      totalCajas: totalCajasGM,
+    };
+  }
+
   var dtoVol = Number(card.customer.dto_vol || 0);
   var payDisc = Number(card.payment.discount || 0);
   var subtotal = 0; // subtotal con dto_vol + web aplicados (lo que la web llama "subtotal")
@@ -3943,6 +4042,34 @@ function cpCardComputeTotals(card) {
 
 function cpCardRenderSummary(card) {
   var t = cpCardComputeTotals(card);
+
+  // Lista GM: resumen simplificado, sin comparación con Excel
+  if (card.isGM) {
+    var gmHtml =
+      '<div class="cp-card-summary">' +
+      '<div class="cp-summary-row cp-summary-gm-badge">&#9654; Lista GM &mdash; sin descuentos</div>' +
+      '<div class="cp-summary-row"><span>Artículos:</span><span>' + (card.parsed ? card.parsed.length : 0) + '</span></div>' +
+      '<div class="cp-summary-row cp-summary-total"><span>Total Lista GM:</span><span>$&nbsp;' + formatMoney(t.finalTotal) + '</span></div>';
+    if (card.invalid && card.invalid.length) {
+      gmHtml += '<div class="cp-summary-row cp-summary-warn">&#9888; ' + card.invalid.length + ' artículo(s) no encontrado(s)</div>';
+    }
+    gmHtml += '</div>';
+    if (card.parsed && card.parsed.length) {
+      gmHtml +=
+        '<button type="button" class="cp-detail-btn cp-detail-btn-summary" title="Ver detalle del pedido">' +
+        '<span class="cp-detail-btn-icon" aria-hidden="true">+</span>' +
+        '<span class="cp-detail-btn-label">Ver detalle del pedido</span>' +
+        '</button>';
+    }
+    card.summaryWrap.innerHTML = gmHtml;
+    card.summaryWrap.style.display = "block";
+    card.summaryWrap.querySelector(".cp-detail-btn-summary") &&
+      card.summaryWrap.querySelector(".cp-detail-btn-summary").addEventListener("click", function () {
+        cpShowDetailOverlay(card);
+      });
+    return;
+  }
+
   var dtoVolPct = Number(card.customer.dto_vol || 0);
   var excelRaw = card.excelTotal; // null si no se pudo leer
   var hasExcel = excelRaw != null;
@@ -4879,17 +5006,20 @@ async function cpCardDoSubmit(card) {
     var session = sessionResult.data.session;
     var token = session.access_token;
 
-    var dtoVol = Number(card.customer.dto_vol || 0);
-    var payDisc = Number(card.payment.discount || 0);
+    var dtoVol = card.isGM ? 0 : Number(card.customer.dto_vol || 0);
+    var payDisc = card.isGM ? 0 : Number(card.payment.discount || 0);
+    var webDiscount = card.isGM ? 0 : CP_WEB_DISCOUNT;
 
     // Build items payload
     var itemsPayload = card.parsed
       .map(function (it) {
         var p = it.product;
-        var uxb = Number(p.uxb || 0);
+        // GM: uxb y precio vienen del Excel; normal: del producto Supabase
+        var uxb = card.isGM ? Number(it.uxb || 0) : Number(p.uxb || 0);
         var unidades = Number(it.cajas || 0) * uxb;
-        var unitYourPrice =
-          Number(p.list_price || 0) * (1 - dtoVol) * (1 - CP_WEB_DISCOUNT);
+        var unitYourPrice = card.isGM
+          ? Number(it.pricePerUnit || 0)
+          : Number(p.list_price || 0) * (1 - dtoVol) * (1 - webDiscount);
         return {
           product_id: p.id,
           cod_art: String(p.cod || "").trim(),
@@ -4898,7 +5028,7 @@ async function cpCardDoSubmit(card) {
           uxb: uxb,
           unidades: unidades,
           unit_price: unitYourPrice,
-          list_price: Number(p.list_price || 0),
+          list_price: card.isGM ? Number(it.pricePerUnit || 0) : Number(p.list_price || 0),
           description: String(p.description || ""),
           is_loke: false,
         };
@@ -4934,7 +5064,7 @@ async function cpCardDoSubmit(card) {
         p_status: "pendiente",
         p_payment_method: card.payment.text,
         p_payment_discount: payDisc,
-        p_web_discount: CP_WEB_DISCOUNT,
+        p_web_discount: webDiscount,
         p_subtotal: subtotal,
         p_total: finalTotal,
         p_items: rpcItems,

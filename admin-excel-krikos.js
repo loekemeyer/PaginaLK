@@ -617,6 +617,8 @@
       var fileInput = card.querySelector(".xkr-file-input");
 
       var suggestTimer = null;
+      var picking = false;
+      suggest.addEventListener("pointerdown", function () { picking = true; });
       input.addEventListener("input", function () {
         if (suggestTimer) clearTimeout(suggestTimer);
         var q = input.value;
@@ -630,7 +632,7 @@
         }, 220);
       });
       input.addEventListener("blur", function () {
-        setTimeout(function () { suggest.style.display = "none"; }, 200);
+        setTimeout(function () { if (!picking) suggest.style.display = "none"; picking = false; }, 200);
       });
 
       drop.addEventListener("click", function () { fileInput.click(); });
@@ -1101,6 +1103,8 @@
       var suggest = card.querySelector(".xkr-suggest");
       if (!input || !suggest) return;
       var suggestTimer = null;
+      var picking = false;
+      suggest.addEventListener("pointerdown", function () { picking = true; });
       input.addEventListener("input", function () {
         if (suggestTimer) clearTimeout(suggestTimer);
         var q = input.value;
@@ -1112,7 +1116,7 @@
         }, 220);
       });
       input.addEventListener("blur", function () {
-        setTimeout(function () { suggest.style.display = "none"; }, 200);
+        setTimeout(function () { if (!picking) suggest.style.display = "none"; picking = false; }, 200);
       });
     }
 
@@ -1319,12 +1323,14 @@
   // ============================================================================
   // CUSTOMER SEARCH (compartido entre cards)
   // ============================================================================
+  var _suggestSeq = 0;
   async function suggestCustomers(q, suggestEl, onPick) {
     q = String(q || "").trim();
     if (q.length < 2) {
       suggestEl.style.display = "none";
       return;
     }
+    var seq = ++_suggestSeq;
     var isNum = /^\d+$/.test(q);
     try {
       var promises = [
@@ -1345,6 +1351,7 @@
         );
       }
       var results = await Promise.all(promises);
+      if (seq !== _suggestSeq) return;
       var seen = {}, merged = [];
       results.forEach(function (r) {
         if (r.error || !r.data) return;
@@ -1379,7 +1386,7 @@
         .join("");
       suggestEl.style.display = "block";
       suggestEl.querySelectorAll(".xkr-suggest-row").forEach(function (row) {
-        row.addEventListener("mousedown", function (e) {
+        row.addEventListener("pointerdown", function (e) {
           e.preventDefault();
           var id = Number(row.dataset.id);
           var c = merged.find(function (x) { return x.id === id; });
