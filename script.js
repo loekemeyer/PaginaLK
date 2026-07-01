@@ -6855,12 +6855,14 @@ async function _submitSingleOrder(
   };
 
   // Guardar payload para retry automático + marcar is_promo/extra_discount
+  // + quién estaba logueado al confirmar (cliente o vendedor "Pedir para")
   supabaseClient
     .from("orders")
     .update({
       sheets_payload: sheetsPayload,
       is_promo: isPromo,
       extra_discount: extraRate,
+      placed_by_auth_user_id: currentSession.user.id,
     })
     .eq("id", orderId)
     .then(function () {});
