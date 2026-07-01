@@ -1268,6 +1268,28 @@
           </div>
 
           <div
+            style="
+              display: flex;
+              align-items: flex-end;
+              gap: 12px;
+              margin-bottom: 16px;
+              flex-wrap: wrap;
+            "
+          >
+            <div>
+              <label class="field-label" for="origenPedidosDesde">Desde</label>
+              <input type="date" class="field-input" id="origenPedidosDesde" />
+            </div>
+            <div>
+              <label class="field-label" for="origenPedidosHasta">Hasta</label>
+              <input type="date" class="field-input" id="origenPedidosHasta" />
+            </div>
+            <button class="btn-ghost" id="origenPedidosLimpiarBtn">
+              Limpiar filtro
+            </button>
+          </div>
+
+          <div
             id="origenPedidosStats"
             style="
               display: grid;

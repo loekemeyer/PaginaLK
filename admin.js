@@ -640,6 +640,24 @@ if (origenPedidosRefreshBtn) {
   origenPedidosRefreshBtn.addEventListener("click", cargarOrigenPedidos);
 }
 
+["origenPedidosDesde", "origenPedidosHasta"].forEach(function (id) {
+  var el = document.getElementById(id);
+  if (el) el.addEventListener("change", cargarOrigenPedidos);
+});
+
+var origenPedidosLimpiarBtn = document.getElementById(
+  "origenPedidosLimpiarBtn",
+);
+if (origenPedidosLimpiarBtn) {
+  origenPedidosLimpiarBtn.addEventListener("click", function () {
+    var desde = document.getElementById("origenPedidosDesde");
+    var hasta = document.getElementById("origenPedidosHasta");
+    if (desde) desde.value = "";
+    if (hasta) hasta.value = "";
+    cargarOrigenPedidos();
+  });
+}
+
 // ---- GROUP TOGGLES (modulos colapsables) ----
 document.querySelectorAll(".nav-group-toggle").forEach(function (toggle) {
   toggle.addEventListener("click", function () {
@@ -6090,14 +6108,10 @@ async function marcarSucursalCargada(customerId, slot) {
 }
 
 /* =========================================================
-   ESTADÍSTICA CLIENTES
-   - Trae todas las orders confirmadas + customers
-   - Para cada cliente: calcula intervalo promedio entre pedidos (frecuencia)
-   - Calcula días desde el último pedido
-   - "Próximos a comprar": el día esperado de próxima compra cae en ±15 días
-   - "De baja": no hace pedidos hace más de 730 días (2 años)
+   ORIGEN DE PEDIDOS
+   - Cuenta pedidos por origen_pedido (v_orders_origen) con filtro opcional
+     de rango de fechas (sobre created_at).
    ========================================================= */
-var _estCacheLoaded = false;
 async function cargarOrigenPedidos() {
   var statusEl = document.getElementById("origenPedidosStatus");
   var els = {
@@ -6108,6 +6122,9 @@ async function cargarOrigenPedidos() {
   };
   if (!els.cliente) return;
 
+  var desdeVal = document.getElementById("origenPedidosDesde")?.value || "";
+  var hastaVal = document.getElementById("origenPedidosHasta")?.value || "";
+
   if (statusEl) statusEl.textContent = "Cargando…";
 
   try {
@@ -6115,10 +6132,13 @@ async function cargarOrigenPedidos() {
     var counts = {};
     for (var i = 0; i < keys.length; i++) {
       var k = keys[i];
-      var r = await sb
+      var q = sb
         .from("v_orders_origen")
         .select("order_id", { count: "exact", head: true })
         .eq("origen_pedido", k);
+      if (desdeVal) q = q.gte("created_at", desdeVal + "T00:00:00");
+      if (hastaVal) q = q.lte("created_at", hastaVal + "T23:59:59.999");
+      var r = await q;
       if (r.error) throw r.error;
       counts[k] = r.count || 0;
     }
@@ -6129,7 +6149,11 @@ async function cargarOrigenPedidos() {
     els.desconocido.textContent = counts.desconocido;
 
     var total = counts.cliente + counts.vendedor + counts.admin + counts.desconocido;
-    if (statusEl) statusEl.textContent = "Total: " + total + " pedidos.";
+    var rangoTxt =
+      desdeVal || hastaVal
+        ? " (" + (desdeVal || "…") + " a " + (hastaVal || "…") + ")"
+        : "";
+    if (statusEl) statusEl.textContent = "Total: " + total + " pedidos." + rangoTxt;
   } catch (e) {
     console.error("cargarOrigenPedidos error:", e);
     if (statusEl) {
@@ -6140,6 +6164,15 @@ async function cargarOrigenPedidos() {
   }
 }
 
+/* =========================================================
+   ESTADÍSTICA CLIENTES
+   - Trae todas las orders confirmadas + customers
+   - Para cada cliente: calcula intervalo promedio entre pedidos (frecuencia)
+   - Calcula días desde el último pedido
+   - "Próximos a comprar": el día esperado de próxima compra cae en ±15 días
+   - "De baja": no hace pedidos hace más de 730 días (2 años)
+   ========================================================= */
+var _estCacheLoaded = false;
 async function cargarEstadisticaClientes() {
   var statusEl = document.getElementById("estClientesStatus");
   var proxBody = document.querySelector("#estProximosTable tbody");
